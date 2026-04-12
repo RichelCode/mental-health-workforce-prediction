@@ -41,7 +41,6 @@ This project follows a rigorous two-stage resampling framework (Macro/Micro spli
 |---|---|---|
 | Logistic Regression | Baseline | No |
 | Elastic Net (LASSO/Ridge) | Shrinkage | Yes — α, λ |
-| K-Nearest Neighbors | Instance-based | Yes — K |
 | Random Forest | Ensemble (bagging) | Yes — mtry, ntree |
 | Gradient Boosting (XGBoost) | Ensemble (boosting) | Yes — depth, η, rounds |
 
