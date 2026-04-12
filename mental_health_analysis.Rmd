@@ -12,8 +12,14 @@ output:
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
+                      fig.align = "center", fig.width = 8, fig.height = 5)
+```
+
+```{r libraries, message=FALSE, warning=FALSE,include=FALSE}
 library(tidyverse)
+library(kableExtra)
+library(scales)
 ```
 
 ## 1. Data Overview & Source
@@ -38,7 +44,12 @@ tech worker seeks mental health treatment based on workplace environment, employ
 ```{r response-var}
 survey %>%
   count(treatment) %>%
-  mutate(proportion = round(n / sum(n), 3))
+  mutate(proportion = round(n / sum(n), 3)) %>%
+  kbl(caption = "Response variable distribution",
+      col.names = c("Sought Treatment", "Count", "Proportion")) %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = FALSE) %>%
+  row_spec(0, bold = TRUE, background = "#2E86AB", color = "white")
 ```
 
 ## 3. Preliminary Exploratory Data Analysis (EDA)
@@ -47,15 +58,18 @@ survey %>%
 
 The dataset contains **1,259 respondents** and **27 variables**. After removing non-informative columns (`Timestamp`, `state`, `comments`), we retain **24 predictors**.The dataset comfortably exceeds the 8–10 predictor requirement.
 
+
 ```{r eda-structure}
-# Variable type summary
 survey %>%
   summarise(
     total_variables = ncol(.),
     numeric_vars    = sum(sapply(., is.numeric)),
     character_vars  = sum(sapply(., is.character)),
     datetime_vars   = sum(sapply(., lubridate::is.timepoint))
-  )
+  ) %>%
+  kbl(caption = "Dataset structure summary") %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = FALSE)
 ```
 
 ### 3.2 Variable Types
@@ -98,14 +112,18 @@ survey %>%
   pivot_longer(everything(), names_to = "Variable", values_to = "Missing") %>%
   filter(Missing > 0) %>%
   arrange(desc(Missing)) %>%
-  mutate(Pct_Missing = round(Missing / nrow(survey) * 100, 1))
+  mutate(Pct_Missing = round(Missing / nrow(survey) * 100, 1)) %>%
+  kbl(caption = "Missing data by variable") %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = FALSE) %>%
+  row_spec(0, bold = TRUE, background = "#2E86AB", color = "white")
 ```
 
 ## 4. Initial Preprocessing & Cleaning
 
 ### 4.1 Drop non-informative variables
 
-```{r drop-cols}
+```{r drop-cols,include=FALSE}
 survey_clean <- survey %>%
   select(-Timestamp, -state, -comments)
 
@@ -117,7 +135,7 @@ dim(survey_clean)
 ```{r clean-gender}
 survey_clean <- survey_clean %>%
   mutate(Gender = case_when(
-    str_to_lower(Gender) %in% c("male", "m", "man", "cis male", 
+    str_to_lower(Gender) %in% c("male", "m", "man", "cis male",
                                  "male (cis)", "maile", "mal",
                                  "make", "male ", "msle") ~ "Male",
     str_to_lower(Gender) %in% c("female", "f", "woman", "cis female",
@@ -126,12 +144,18 @@ survey_clean <- survey_clean %>%
     TRUE ~ "Other"
   ))
 
-survey_clean %>% count(Gender)
+survey_clean %>%
+  count(Gender) %>%
+  kbl(caption = "Gender distribution after cleaning",
+      col.names = c("Gender", "Count")) %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = FALSE) %>%
+  row_spec(0, bold = TRUE, background = "#2E86AB", color = "white")
 ```
 
 ### 4.3 Fix Age outliers
 
-```{r clean-age}
+```{r clean-age,include=FALSE}
 # Inspect Age range before cleaning
 summary(survey_clean$Age)
 
@@ -144,7 +168,7 @@ summary(survey_clean$Age)
 
 ### 4.4 Impute missing values
 
-```{r impute-missing}
+```{r impute-missing,include=FALSE}
 # Impute work_interfere and self_employed with mode
 get_mode <- function(x) {
   ux <- unique(na.omit(x))
@@ -165,7 +189,7 @@ colSums(is.na(survey_clean))
 
 ### 4.5 Convert characters to factors
 
-```{r factorize}
+```{r factorize,include=FALSE}
 survey_clean <- survey_clean %>%
   mutate(across(where(is.character), as.factor))
 
@@ -173,6 +197,7 @@ glimpse(survey_clean)
 ```
 
 ### 4.6 Final cleaned dataset summary
+
 
 ```{r final-summary}
 dim(survey_clean)
@@ -183,5 +208,10 @@ survey_clean %>%
     n_predictors   = ncol(.) - 1,
     numeric_vars   = sum(sapply(., is.numeric)),
     factor_vars    = sum(sapply(., is.factor))
-  )
+  ) %>%
+  kbl(caption = "Final cleaned dataset summary",
+      col.names = c("Observations","Predictors","Numeric vars","Factor vars")) %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = FALSE) %>%
+  row_spec(0, bold = TRUE, background = "#2E86AB", color = "white")
 ```
