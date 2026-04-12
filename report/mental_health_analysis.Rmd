@@ -1,0 +1,391 @@
+---
+title: "Mental Health Treatment Prediction in the Workplace"
+subtitle: "Preparation 1: Data Selection and Initial Preprocessing"
+author: "Richel Attafuah"
+date: "April 2026"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    highlight: tango
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
+                      fig.align = "center", fig.width = 8, fig.height = 5)
+```
+
+```{r libraries, message=FALSE, warning=FALSE,include=FALSE}
+library(tidyverse)
+library(kableExtra)
+library(scales)
+```
+
+## 1. Data Overview & Source
+
+The dataset used in this project is the **OSMI Mental Health in Tech Survey (2014)**, collected by Open Sourcing Mental Illness (OSMI), a non-profit organization dedicated to raising awareness and providing resources for mental health in the tech community. The survey was administered online and captures responses from tech workers across 60+ countries on workplace mental health culture, employer support, and personal 
+mental health history.
+
+**Source:** [OSMI Mental Health in Tech Survey — Kaggle](https://www.kaggle.com/datasets/osmi/mental-health-in-tech-survey)
+
+
+```{r load-data, message=FALSE,warning=FALSE, include=FALSE}
+survey <- read_csv("data/survey.csv")
+dim(survey)
+glimpse(survey)
+```
+
+## 2. Response Variable Identification
+
+The response variable for this project is **`treatment`** ,  a binary variable indicating whether a tech worker has sought mental health treatment (Yes/No). This is a **Classification** problem. The goal is to predict the probability that a 
+tech worker seeks mental health treatment based on workplace environment, employee support policies, and personal background factors.
+
+```{r response-var,echo=FALSE}
+survey %>%
+  count(treatment) %>%
+  mutate(proportion = round(n / sum(n), 3)) %>%
+  kbl(caption = "Response variable distribution",
+      col.names = c("Sought Treatment", "Count", "Proportion")) %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = FALSE) %>%
+  row_spec(0, bold = TRUE, background = "#2E86AB", color = "white")
+```
+
+## 3. Preliminary Exploratory Data Analysis (EDA)
+
+### 3.1 Dataset Structure
+
+The dataset contains **1,259 respondents** and **27 variables**. After removing non-informative columns (`Timestamp`, `state`, `comments`), we retain **24 predictors**.The dataset comfortably exceeds the 8–10 predictor requirement.
+
+
+```{r eda-structure,echo=FALSE}
+survey %>%
+  summarise(
+    total_variables = ncol(.),
+    numeric_vars    = sum(sapply(., is.numeric)),
+    character_vars  = sum(sapply(., is.character)),
+    datetime_vars   = sum(sapply(., lubridate::is.timepoint))
+  ) %>%
+  kbl(caption = "Dataset structure summary") %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = FALSE)
+```
+
+### 3.2 Variable Types
+
+### 3.2.1 Variable Descriptions
+
+The OSMI Mental Health in Tech Survey captures a rich set of workplace, organizational, and personal factors that may influence whether a tech worker seeks mental health treatment. The dataset contains one continuous numeric predictor (Age), one engineered categorical predictor (Gender), and 21 additional categorical predictors covering employer policies, workplace culture, and personal mental health history. The response variable, `treatment`, is a binary indicator of whether the respondent has ever sought professional mental health treatment.
+Understanding each variable is essential before modeling, several predictors capture closely related constructs (e.g. `mental_health_consequence` and `obs_consequence`) that may exhibit multicollinearity, and ordered categorical variables such as `work_interfere` and `leave` will require special attention during feature engineering to preserve their natural 
+ordering.
+
+```{r data-dictionary,echo=FALSE}
+tibble(
+  Variable = c(
+    "treatment", "Age", "Gender", "Country", "self_employed",
+    "family_history", "work_interfere", "no_employees", "remote_work",
+    "tech_company", "benefits", "care_options", "wellness_program",
+    "seek_help", "anonymity", "leave", "mental_health_consequence",
+    "phys_health_consequence", "coworkers", "supervisor",
+    "mental_health_interview", "phys_health_interview",
+    "mental_vs_physical", "obs_consequence"
+  ),
+  Role = c(
+    "Response",
+    rep("Predictor", 23)
+  ),
+  Type = c(
+    "Binary factor",
+    "Numeric (continuous)",
+    "Categorical factor (3 levels)",
+    "Categorical factor",
+    "Binary factor",
+    "Binary factor",
+    "Ordinal factor (4 levels)",
+    "Ordinal factor (6 levels)",
+    "Binary factor",
+    "Binary factor",
+    "Categorical factor (3 levels)",
+    "Categorical factor (3 levels)",
+    "Categorical factor (3 levels)",
+    "Categorical factor (3 levels)",
+    "Categorical factor (3 levels)",
+    "Ordinal factor (5 levels)",
+    "Categorical factor (3 levels)",
+    "Categorical factor (3 levels)",
+    "Categorical factor (3 levels)",
+    "Categorical factor (3 levels)",
+    "Categorical factor (3 levels)",
+    "Categorical factor (3 levels)",
+    "Categorical factor (3 levels)",
+    "Binary factor"
+  ),
+  Description = c(
+    "Whether the respondent has ever sought professional mental health treatment (Yes / No)",
+    "Age of the respondent in years. Cleaned to retain only plausible values between 18 and 75",
+    "Gender identity of the respondent. Raw entries were standardized into three categories: Male, Female, and Other",
+    "Country of residence or employment of the respondent",
+    "Whether the respondent is self-employed (Yes / No)",
+    "Whether the respondent has a family history of mental illness (Yes / No)",
+    "How often mental health conditions interfere with work when untreated (Never / Rarely / Sometimes / Often)",
+    "Number of employees at the respondent's company (1–5 / 6–25 / 26–100 / 100–500 / 500–1000 / More than 1000)",
+    "Whether the respondent works remotely at least 50% of the time (Yes / No)",
+    "Whether the respondent's employer is primarily a tech company or organization (Yes / No)",
+    "Whether the employer provides mental health benefits as part of health coverage (Yes / No / Don't know)",
+    "Whether the respondent is aware of mental health care options provided by their employer (Yes / No / Not sure)",
+    "Whether the employer has formally discussed mental health as part of a wellness program (Yes / No / Don't know)",
+    "Whether the employer provides resources to learn about mental health issues and how to seek help (Yes / No / Don't know)",
+    "Whether anonymity is protected if the respondent chooses to use mental health or substance abuse treatment resources (Yes / No / Don't know)",
+    "How easy it is to take medical leave for a mental health condition (Very easy / Somewhat easy / Don't know / Somewhat difficult / Very difficult)",
+    "Whether the respondent believes discussing a mental health issue with their employer would have negative consequences (Yes / No / Maybe)",
+    "Whether the respondent believes discussing a physical health issue with their employer would have negative consequences (Yes / No / Maybe)",
+    "Whether the respondent would be comfortable discussing a mental health issue with their coworkers (Yes / No / Some of them)",
+    "Whether the respondent would be comfortable discussing a mental health issue with their direct supervisor (Yes / No / Some of them)",
+    "Whether the respondent would bring up a mental health issue in a job interview (Yes / No / Maybe)",
+    "Whether the respondent would bring up a physical health issue in a job interview (Yes / No / Maybe)",
+    "Whether the respondent feels their employer takes mental health as seriously as physical health (Yes / No / Don't know)",
+    "Whether the respondent has heard of or observed negative consequences for coworkers who disclosed mental health issues (Yes / No)"
+  )
+) %>%
+  kbl(caption = "Data dictionary — full variable inventory with descriptions",
+      col.names = c("Variable", "Role", "Type", "Description")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = TRUE, font_size = 13) %>%
+  row_spec(0, bold = TRUE, background = "#2E86AB", color = "white") %>%
+  row_spec(1, background = "#D4EDDA", bold = TRUE) %>%
+  column_spec(1, bold = TRUE, monospace = TRUE, width = "14em") %>%
+  column_spec(2, width = "7em") %>%
+  column_spec(3, width = "16em", italic = TRUE, color = "gray40") %>%
+  column_spec(4, width = "40em") %>%
+  scroll_box(width = "100%", height = "500px")
+```
+```{r variable-types,include=FALSE}
+tibble(
+  Variable = names(survey),
+  Type     = sapply(survey, class),
+  Role     = case_when(
+    Variable == "treatment"  ~ "Response",
+    Variable %in% c("Timestamp", "state", "comments") ~ "Drop",
+    TRUE ~ "Predictor"
+  )
+)
+```
+
+### 3.3 Response Variable Distribution
+
+```{r response-plot, fig.align='center',echo=FALSE}
+survey %>%
+  count(treatment) %>%
+  mutate(proportion = round(n / sum(n), 3)) %>%
+  ggplot(aes(x = treatment, y = n, fill = treatment)) +
+  geom_col(width = 0.5, show.legend = FALSE) +
+  geom_text(aes(label = paste0(n, " (", proportion*100, "%)")),
+            vjust = -0.5, size = 4) +
+  scale_fill_manual(values = c("Yes" = "#2E86AB", "No" = "#A8DADC")) +
+  labs(title    = "Distribution of mental health treatment-seeking",
+       subtitle = "Nearly balanced classes: no resampling correction needed",
+       x        = "Sought treatment",
+       y        = "Count") +
+  theme_minimal(base_size = 13)
+```
+
+
+The response variable `treatment` is remarkably well-balanced, with **637 respondents (50.6%)** reporting that they have sought mental health treatment and **622 (49.4%)** reporting that they have not. This near-perfect class balance is a favorable property for classification modeling ,it means that a naive classifier that predicts the majority class every time would achieve only around 50% accuracy, giving our models a meaningful benchmark to surpass. Crucially, it also means that standard evaluation metrics such as accuracy are not misleading here, and no resampling corrections such as 
+SMOTE or class weighting will be necessary.
+The balance also carries a substantive interpretation: mental health treatment-seeking is not a rare behavior in the tech workforce. Roughly half of survey respondents have sought professional help at some point, suggesting that the barriers to treatment are not insurmountable, but that meaningful variation exists in who chooses to seek help. This is precisely what makes the prediction task interesting and the resulting model actionable for employers and HR teams designing targeted mental health programs.
+
+### 3.4 Missing Data Overview
+
+```{r missing-data,echo=FALSE}
+survey %>%
+  summarise(across(everything(), ~ sum(is.na(.)))) %>%
+  pivot_longer(everything(), names_to = "Variable", values_to = "Missing") %>%
+  filter(Missing > 0) %>%
+  arrange(desc(Missing)) %>%
+  mutate(Pct_Missing = round(Missing / nrow(survey) * 100, 1)) %>%
+  kbl(caption = "Missing data by variable") %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = FALSE) %>%
+  row_spec(0, bold = TRUE, background = "#2E86AB", color = "white")
+```
+
+Only four variables in the dataset contained missing values, and the pattern of missingness is both interpretable and manageable. The `comments` field, which captured open-ended free-text responses, was missing for **87.1% of 
+respondents**  this is entirely expected, as open-ended fields are rarely completed in voluntary surveys and carry no predictive value in a structured modeling context. It has been dropped from the analysis entirely. Similarly, `state` was missing for **40.9%** of respondents, largely because the question was only applicable to those based in the United States, retaining it would introduce substantial bias and noise, and it has likewise been removed.
+
+The remaining two variables with missing data present no serious concern.`work_interfere` one of the most substantively important predictors in this dataset, capturing how frequently mental health conditions interfere with work, was missing for **21.0%** of respondents. Rather than discard these observations or the variable itself, missing values were imputed using the mode of the observed responses, preserving the full sample size and retaining this critical predictor. `self_employed` was missing for just **1.4%** of respondents and was handled identically.
+
+Importantly, after applying these targeted remediation strategies, **zero missing values remain** across all 24 variables in the cleaned dataset. The decision to impute rather than drop reflects a deliberate effort to retain as many observations as possible for modeling, particularly given that the original sample of 1,259 respondents is already modest in size.
+
+## 4. Initial Preprocessing & Cleaning
+
+### 4.1 Drop non-informative variables
+
+Before modeling can begin, three variables were removed from the dataset entirely. `Timestamp` records the date and time the survey was submitted and carries no information about a respondent's likelihood of seeking mental health treatment. `state` was retained in the raw data long enough to assess its missingness, which at 40.9% was too severe to recover 
+through imputation. `comments` was a free-text field left blank by 87.1% of respondents, and even where populated, unstructured text cannot be used directly in the models planned for this project. Removing these three columns reduces the variable count from 27 to 24, leaving a clean set of 23 predictors and one response variable.
+
+```{r drop-cols,include=FALSE}
+survey_clean <- survey %>%
+  select(-Timestamp, -state, -comments)
+
+dim(survey_clean)
+```
+
+### 4.2 Clean the Gender variable
+
+```{r clean-gender,echo=FALSE}
+survey_clean <- survey_clean %>%
+  mutate(Gender = case_when(
+    str_to_lower(Gender) %in% c("male", "m", "man", "cis male",
+                                 "male (cis)", "maile", "mal",
+                                 "make", "male ", "msle") ~ "Male",
+    str_to_lower(Gender) %in% c("female", "f", "woman", "cis female",
+                                 "female (cis)", "femail", "femake",
+                                 "female ") ~ "Female",
+    TRUE ~ "Other"
+  ))
+
+survey_clean %>%
+  count(Gender) %>%
+  kbl(caption = "Gender distribution after cleaning",
+      col.names = c("Gender", "Count")) %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = FALSE) %>%
+  row_spec(0, bold = TRUE, background = "#2E86AB", color = "white")
+```
+
+### 4.3 Fix Age outliers
+
+The `Age` variable contained severely implausible values prior to cleaning. The table below shows the distributional summary before and after restricting the variable to the plausible working-age range of 18 to 75 years.
+
+```{r clean-age,echo=FALSE}
+before_summary <- survey_clean %>%
+  summarise(
+    Min    = min(Age),
+    Q1     = quantile(Age, 0.25),
+    Median = median(Age),
+    Mean   = round(mean(Age), 1),
+    Q3     = quantile(Age, 0.75),
+    Max    = max(Age)
+  )
+
+survey_clean <- survey_clean %>%
+  filter(Age >= 18, Age <= 75)
+
+after_summary <- survey_clean %>%
+  summarise(
+    Min    = min(Age),
+    Q1     = quantile(Age, 0.25),
+    Median = median(Age),
+    Mean   = round(mean(Age), 1),
+    Q3     = quantile(Age, 0.75),
+    Max    = max(Age)
+  )
+
+bind_rows(
+  before_summary %>% mutate(Stage = "Before cleaning"),
+  after_summary  %>% mutate(Stage = "After cleaning")
+) %>%
+  select(Stage, everything()) %>%
+  kbl(caption = "Age variable summary — before and after outlier removal") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE) %>%
+  row_spec(0, bold = TRUE, background = "#2E86AB", color = "white") %>%
+  row_spec(1, background = "#FDECEA", bold = FALSE) %>%
+  row_spec(2, background = "#D4EDDA", bold = FALSE) %>%
+  column_spec(1, bold = TRUE)
+```
+
+The before-cleaning row reveals a minimum age of **−1,726** and a maximum exceeding **100 billion** , clear data entry errors with no plausible real-world interpretation. After filtering to ages 18–75, only **8 observations** were removed, and the core distribution remained virtually unchanged, confirming these were isolated anomalies rather than a systemic data quality issue.
+
+
+
+```{r impute-missing,include=FALSE}
+# Impute work_interfere and self_employed with mode
+get_mode <- function(x) {
+  ux <- unique(na.omit(x))
+  ux[which.max(tabulate(match(x, ux)))]
+}
+
+survey_clean <- survey_clean %>%
+  mutate(
+    work_interfere = ifelse(is.na(work_interfere), 
+                            get_mode(work_interfere), work_interfere),
+    self_employed  = ifelse(is.na(self_employed),  
+                            get_mode(self_employed),  self_employed)
+  )
+
+# Confirm no missing values remain
+colSums(is.na(survey_clean))
+```
+
+
+```{r factorize,include=FALSE}
+survey_clean <- survey_clean %>%
+  mutate(across(where(is.character), as.factor))
+
+glimpse(survey_clean)
+```
+
+### 4.6 Final cleaned dataset summary
+
+
+```{r final-summary,echo=FALSE}
+survey_clean %>%
+  summarise(
+    n_observations = n(),
+    n_predictors   = ncol(.) - 1,
+    numeric_vars   = sum(sapply(., is.numeric)),
+    factor_vars    = sum(sapply(., is.factor))
+  ) %>%
+  kbl(caption = "Final cleaned dataset summary",
+      col.names = c("Observations","Predictors","Numeric vars","Factor vars")) %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = FALSE) %>%
+  row_spec(0, bold = TRUE, background = "#2E86AB", color = "white")
+```
+
+## 5. Next Steps
+
+### 5.1 Modeling Strategy
+
+Having established a clean, well-structured dataset of **1,251 observations** across **23 predictors**, this project will proceed to the full predictive modeling pipeline. All subsequent modeling will be performed on `survey_clean.csv` 
+to ensure a fully reproducible workflow.
+
+The central modeling question is:
+
+> *Can we accurately predict whether a tech worker will seek mental health 
+> treatment based on their workplace environment, employer policies, and 
+> personal background?*
+
+### 5.2 Macro/Micro Resampling Framework
+
+Following the two-stage resampling methodology introduced in Lecture 4, the data will be partitioned into a **macro holdout test set** (held out entirely until final evaluation) and a **micro training set** on which all model development, cross-validation, and hyperparameter tuning will be conducted. This approach ensures that our final performance estimates are honest and generalizable, the test set will never influence any modeling decision.
+
+### 5.3 Model Selection Rationale
+
+Five model types have been selected to represent a diverse range of statistical learning approaches. The choice of models was deliberately informed by the structure of this dataset, where **23 of 24 predictors are 
+categorical**. Distance-based methods such as K-Nearest Neighbors were excluded because Euclidean distance is not meaningful for factor variables. A Decision Tree was selected in their place, as tree-based methods handle categorical predictors naturally and produce interpretable decision rules,a particularly valuable property in healthcare contexts where model transparency matters.
+
+The five planned models are:
+
+- **Logistic Regression** will serve as the interpretable baseline. It requires no tuning, is well-understood, and establishes the performance floor against which all other models will be compared.
+
+- **Elastic Net (Lasso/Ridge)** will apply shrinkage-based regularization for automatic variable selection. The mixing parameter alpha and regularization strength lambda will be tuned via cross-validation,allowing the model to select the most informative predictors from the full set of 23.
+
+- **Decision Tree** will provide a single, fully interpretable tree-based model. The tree depth and complexity parameter (cp) will be tuned to balance fit and parsimony, and the resulting tree will be visualized to extract meaningful decision rules.
+
+- **Random Forest** will extend the single tree to a bagging ensemble of hundreds of trees, capturing complex non-linear interactions among predictors. The number of predictors sampled at each split (mtry) will be tuned via cross-validation.
+
+- **Gradient Boosting (XGBoost)** will apply a sequential boosting strategy that iteratively corrects prediction errors. Key 
+hyperparameters : learning rate, maximum tree depth, and number of 
+boosting rounds : will be tuned systematically.
+
+### 5.4 Evaluation Framework
+
+All models will be evaluated on the held-out macro test set using four metrics reported together: **AUC-ROC**, **Accuracy**, **Sensitivity**,and **Specificity**. AUC-ROC will serve as the primary model selection 
+criterion, as it evaluates performance across all classification thresholds rather than at a single cutoff.
+
+**Sensitivity** is given particular importance in this context. In a mental health setting, failing to identify an individual who would benefit from treatment,  a false negative carries a higher real-world cost than an 
+unnecessary positive flag. A model that maximizes sensitivity ensures fewer at-risk individuals are missed.
+
