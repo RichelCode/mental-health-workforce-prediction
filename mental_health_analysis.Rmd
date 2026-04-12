@@ -1,0 +1,187 @@
+---
+title: "Mental Health Treatment Prediction in the Workplace"
+subtitle: "Preparation 1: Data Selection and Initial Preprocessing"
+author: "Richel Attafuah"
+date: "April 2026"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    highlight: tango
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+## 1. Data Overview & Source
+
+The dataset used in this project is the **OSMI Mental Health in Tech Survey (2014)**, collected by Open Sourcing Mental Illness (OSMI), a non-profit organization dedicated to raising awareness and providing resources for mental health in the tech community. The survey was administered online and captures responses from tech workers across 60+ countries on workplace mental health culture, employer support, and personal 
+mental health history.
+
+**Source:** [OSMI Mental Health in Tech Survey — Kaggle](https://www.kaggle.com/datasets/osmi/mental-health-in-tech-survey)
+
+
+```{r load-data, message=FALSE,warning=FALSE, include=FALSE}
+survey <- read_csv("data/survey.csv")
+dim(survey)
+glimpse(survey)
+```
+
+## 2. Response Variable Identification
+
+The response variable for this project is **`treatment`** ,  a binary variable indicating whether a tech worker has sought mental health treatment (Yes/No). This is a **Classification** problem. The goal is to predict the probability that a 
+tech worker seeks mental health treatment based on workplace environment, employee support policies, and personal background factors.
+
+```{r response-var}
+survey %>%
+  count(treatment) %>%
+  mutate(proportion = round(n / sum(n), 3))
+```
+
+## 3. Preliminary Exploratory Data Analysis (EDA)
+
+### 3.1 Dataset Structure
+
+The dataset contains **1,259 respondents** and **27 variables**. After removing non-informative columns (`Timestamp`, `state`, `comments`), we retain **24 predictors**.The dataset comfortably exceeds the 8–10 predictor requirement.
+
+```{r eda-structure}
+# Variable type summary
+survey %>%
+  summarise(
+    total_variables = ncol(.),
+    numeric_vars    = sum(sapply(., is.numeric)),
+    character_vars  = sum(sapply(., is.character)),
+    datetime_vars   = sum(sapply(., lubridate::is.timepoint))
+  )
+```
+
+### 3.2 Variable Types
+
+```{r variable-types}
+tibble(
+  Variable = names(survey),
+  Type     = sapply(survey, class),
+  Role     = case_when(
+    Variable == "treatment"  ~ "Response",
+    Variable %in% c("Timestamp", "state", "comments") ~ "Drop",
+    TRUE ~ "Predictor"
+  )
+)
+```
+
+### 3.3 Response Variable Distribution
+
+```{r response-plot, fig.align='center'}
+survey %>%
+  count(treatment) %>%
+  mutate(proportion = round(n / sum(n), 3)) %>%
+  ggplot(aes(x = treatment, y = n, fill = treatment)) +
+  geom_col(width = 0.5, show.legend = FALSE) +
+  geom_text(aes(label = paste0(n, " (", proportion*100, "%)")),
+            vjust = -0.5, size = 4) +
+  scale_fill_manual(values = c("Yes" = "#2E86AB", "No" = "#A8DADC")) +
+  labs(title    = "Distribution of mental health treatment-seeking",
+       subtitle = "Nearly balanced classes — no resampling correction needed",
+       x        = "Sought treatment",
+       y        = "Count") +
+  theme_minimal(base_size = 13)
+```
+
+### 3.4 Missing Data Overview
+
+```{r missing-data}
+survey %>%
+  summarise(across(everything(), ~ sum(is.na(.)))) %>%
+  pivot_longer(everything(), names_to = "Variable", values_to = "Missing") %>%
+  filter(Missing > 0) %>%
+  arrange(desc(Missing)) %>%
+  mutate(Pct_Missing = round(Missing / nrow(survey) * 100, 1))
+```
+
+## 4. Initial Preprocessing & Cleaning
+
+### 4.1 Drop non-informative variables
+
+```{r drop-cols}
+survey_clean <- survey %>%
+  select(-Timestamp, -state, -comments)
+
+dim(survey_clean)
+```
+
+### 4.2 Clean the Gender variable
+
+```{r clean-gender}
+survey_clean <- survey_clean %>%
+  mutate(Gender = case_when(
+    str_to_lower(Gender) %in% c("male", "m", "man", "cis male", 
+                                 "male (cis)", "maile", "mal",
+                                 "make", "male ", "msle") ~ "Male",
+    str_to_lower(Gender) %in% c("female", "f", "woman", "cis female",
+                                 "female (cis)", "femail", "femake",
+                                 "female ") ~ "Female",
+    TRUE ~ "Other"
+  ))
+
+survey_clean %>% count(Gender)
+```
+
+### 4.3 Fix Age outliers
+
+```{r clean-age}
+# Inspect Age range before cleaning
+summary(survey_clean$Age)
+
+# Remove implausible ages (keep 18-75)
+survey_clean <- survey_clean %>%
+  filter(Age >= 18, Age <= 75)
+
+summary(survey_clean$Age)
+```
+
+### 4.4 Impute missing values
+
+```{r impute-missing}
+# Impute work_interfere and self_employed with mode
+get_mode <- function(x) {
+  ux <- unique(na.omit(x))
+  ux[which.max(tabulate(match(x, ux)))]
+}
+
+survey_clean <- survey_clean %>%
+  mutate(
+    work_interfere = ifelse(is.na(work_interfere), 
+                            get_mode(work_interfere), work_interfere),
+    self_employed  = ifelse(is.na(self_employed),  
+                            get_mode(self_employed),  self_employed)
+  )
+
+# Confirm no missing values remain
+colSums(is.na(survey_clean))
+```
+
+### 4.5 Convert characters to factors
+
+```{r factorize}
+survey_clean <- survey_clean %>%
+  mutate(across(where(is.character), as.factor))
+
+glimpse(survey_clean)
+```
+
+### 4.6 Final cleaned dataset summary
+
+```{r final-summary}
+dim(survey_clean)
+
+survey_clean %>%
+  summarise(
+    n_observations = n(),
+    n_predictors   = ncol(.) - 1,
+    numeric_vars   = sum(sapply(., is.numeric)),
+    factor_vars    = sum(sapply(., is.factor))
+  )
+```
