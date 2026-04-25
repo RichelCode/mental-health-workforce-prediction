@@ -1,6 +1,6 @@
 ---
 title: "Mental Health Treatment Prediction in the Workplace"
-subtitle: "Preparation 1: Data Selection and Initial Preprocessing"
+subtitle: ""Preparation 1 & 2: Data Preprocessing and Modeling Plan""
 author: "Richel Attafuah"
 date: "April 2026"
 output:
@@ -389,3 +389,155 @@ criterion, as it evaluates performance across all classification thresholds rath
 **Sensitivity** is given particular importance in this context. In a mental health setting, failing to identify an individual who would benefit from treatment,  a false negative carries a higher real-world cost than an 
 unnecessary positive flag. A model that maximizes sensitivity ensures fewer at-risk individuals are missed.
 
+
+---
+
+## 6. Model Selection & Justification
+
+This project investigates a **binary classification problem**, predicting whether a tech worker seeks mental health treatment (Yes/No), using a dataset of 1,251 observations and 23 predictors, of which 22 are categorical and one is continuous. Four model types were selected to represent a deliberately diverse range of statistical learning approaches, spanning interpretable parametric models, regularized regression, and both single and ensemble tree-based methods. Each model was chosen not only 
+for its methodological distinctiveness but for its specific suitability to the structure of this dataset.
+
+### 6.1 Logistic Regression
+
+Logistic regression is the natural starting point for any binary classification problem. As a generalized linear model, it estimates the log-odds of treatment-seeking as a linear combination of the 
+predictors, producing output that is directly interpretable as probability. Its greatest strength in this context is transparency,each coefficient carries a clear and communicable meaning, which 
+matters in a healthcare setting where stakeholders need to understand not just what the model predicts, but why.
+Logistic regression also serves an important methodological role as the **performance baseline**. If more complex models cannot meaningfully outperform a well-fitted logistic regression, that is itself a 
+substantively important finding. Given the categorical nature of the predictors, logistic regression with dummy-encoded factors is entirely appropriate and will serve as the benchmark against which all other models are evaluated.
+
+### 6.2 Elastic Net (Lasso / Ridge Regularization)
+
+With 23 predictors,several of which capture closely related constructs such as mental_health_consequence` and `obs_consequence`, there is a meaningful risk of multicollinearity inflating coefficient estimates in an unregularized logistic regression. Elastic Net addresses this directly by applying a combination of L1 (Lasso) and L2 (Ridge) penalties to shrink or eliminate redundant predictors.
+The Lasso component performs automatic variable selection by driving the coefficients of uninformative predictors to exactly zero, producing a sparse and interpretable model. The Ridge component stabilizes 
+coefficient estimates in the presence of correlated predictors. The mixing parameter alpha, which governs the balance between these two penalties, and the regularization strength lambda will both be tuned via cross-validation. Elastic Net is chosen over standalone Lasso or Ridge because it offers the flexibility to adapt to the degree of sparsity and correlation present in the data, rather than assuming either in advance.
+
+### 6.3 Random Forest
+
+Random Forest is a bagging ensemble that constructs a large number of decision trees on bootstrap samples of the training data and aggregates their predictions by majority vote. By averaging across hundreds of diverse trees, it substantially reduces the variance that plagues individual decision trees without introducing the bias of linear models.
+Random Forest is particularly well-suited to this dataset for two reasons. First, tree-based methods handle categorical predictors naturally, without requiring the assumption of linearity or the 
+explicit creation of distance metrics. Second, Random Forest automatically captures non-linear relationships and interaction effects, for example, the combined effect of `family_history` and 
+`work_interfere` on treatment-seeking, that a logistic regression would miss unless interaction terms were explicitly specified. Variable importance measures produced by the Random Forest will also provide 
+interpretable insight into which predictors drive prediction most strongly.
+
+### 6.4 Gradient Boosting (XGBoost)
+
+Gradient Boosting builds an ensemble of trees sequentially rather than in parallel, with each successive tree trained to correct the residual errors of the ensemble so far. This iterative error-correction 
+strategy typically produces higher predictive accuracy than bagging approaches, at the cost of greater sensitivity to hyperparameter choices and a higher risk of overfitting if not carefully tuned.
+XGBoost is included because it represents a methodologically distinct approach from Random Forest, boosting versus bagging, and consistently ranks among the highest-performing algorithms in applied classification tasks. Its inclusion allows a direct empirical comparison between the two dominant ensemble paradigms. The learning rate, maximum tree depth, and number of boosting rounds will all be tuned systematically via cross-validation to ensure the model generalizes well to unseen data 
+rather than memorizing the training set.
+
+---
+
+## 7. Methodological Outlines
+
+The following section provides a structured analytical plan for each of the four selected models. No modeling is performed at this stage, this outlines the precise steps that will be followed during the full project implementation.
+
+### 7.1 Resampling Strategy — Applied to All Models
+
+All four models will follow the same two-stage resampling framework introduced in Lecture 4. The cleaned dataset of 1,251 observations will first be partitioned at the **macro level** into a training set 
+(80%) and a held-out test set (20%). The test set will be locked away entirely and used only once, for final model evaluation. All model development, cross-validation, and hyperparameter tuning will be 
+conducted exclusively on the training set using **10-fold cross-validation** at the **micro level**. This two-stage design ensures that reported test set performance is a genuine out-of-sample estimate, uncontaminated by any modeling decisions.
+
+```{r resampling-diagram, echo=FALSE}
+tibble(
+  Stage = c("Macro split", "Macro split", "Micro level", "Micro level"),
+  Partition = c("Training set", "Test set (holdout)",
+                "Cross-validation folds", "Validation fold"),
+  Proportion = c("80% (approx. 1,001 obs.)", "20% (approx. 250 obs.)",
+                 "9 folds used for fitting", "1 fold used for evaluation"),
+  Purpose = c(
+    "All model training, tuning, and selection",
+    "Final evaluation only,never used during development",
+    "Rotated across 10 iterations for each model",
+    "Produces unbiased estimate of tuning performance"
+  )
+) %>%
+  kbl(caption = "Two-stage resampling framework") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = TRUE) %>%
+  row_spec(0, bold = TRUE, background = "#2E86AB", color = "white") %>%
+  row_spec(1, background = "#E8F4F8") %>%
+  row_spec(2, background = "#FDECEA") %>%
+  row_spec(3:4, background = "#F9F9F9") %>%
+  column_spec(1, bold = TRUE) %>%
+  column_spec(4, italic = TRUE, color = "gray40")
+```
+
+### 7.2 Logistic Regression
+
+**Model-specific preprocessing:** All categorical predictors will be dummy-encoded using treatment contrasts, with one level dropped per variable to avoid perfect multicollinearity. The continuous predictor `Age` will be standardized to zero mean and unit variance to ensure coefficient comparability. No variable selection will be applied at this stage, all 23 predictors will enter the model to establish a full baseline.
+
+**Hyperparameter tuning:** Logistic regression contains no hyperparameters requiring tuning. The model will be fitted once on the full training set using maximum likelihood estimation.
+
+**Performance metrics:** Accuracy, AUC-ROC, Sensitivity, Specificity, and F1-Score will be computed on the held-out test set. The classification threshold will be set at 0.5 for accuracy-based metrics, with AUC-ROC evaluated across all thresholds.
+
+### 7.3 Elastic Net
+
+**Model-specific preprocessing:** Identical dummy encoding and Age standardization as logistic regression. Standardization is especially important here because the L1 and L2 penalties are scale-dependent,predictors on different scales would be penalized unequally without it.
+
+**Hyperparameter tuning:** Two hyperparameters will be tuned jointly via 10-fold cross-validation using `cv.glmnet`. The mixing parameter **alpha** (ranging from 0 = pure Ridge to 1 = pure Lasso) controls 
+the blend of penalties, and the regularization strength **lambda** controls the overall degree of shrinkage. A grid search across values of alpha in {0, 0.25, 0.5, 0.75, 1} and a sequence of lambda values generated automatically by `glmnet` will identify the optimal combination by minimizing cross-validated classification error.
+
+**Performance metrics:** Same as logistic regression. Additionally, the number of predictors retained (non-zero coefficients) at the optimal lambda will be reported to quantify the degree of variable 
+selection achieved.
+
+### 7.4 Random Forest
+
+**Model-specific preprocessing:** Random Forest requires no dummy encoding, factor variables are handled natively by the algorithm. 
+Age standardization is also unnecessary as tree-based splits are invariant to monotone transformations of predictors. The dataset will be passed in its cleaned factor format directly.
+
+**Hyperparameter tuning:** The primary tuning parameter is **mtry** , the number of predictors randomly sampled as candidates at each tree split. Values of mtry will be evaluated across a grid from 2 
+to 10 using 10-fold cross-validation, with AUC-ROC as the selection criterion. The number of trees will be set to 500, which is sufficient for stable ensemble estimates given the dataset size. 
+Minimum node size will also be explored as a secondary tuning parameter.
+
+**Performance metrics:** AUC-ROC, Accuracy, Sensitivity, and Specificity on the test set. Variable importance will be reported using mean decrease in Gini impurity to identify the most influential predictors in the final model.
+
+### 7.5 Gradient Boosting (XGBoost)
+
+**Model-specific preprocessing:** XGBoost requires numeric input, all factor variables will be integer-encoded or dummy-encoded prior to model fitting. Age will be left on its original scale as boosting algorithms are not sensitive to predictor scaling.
+
+**Hyperparameter tuning:** Three hyperparameters will be tuned via grid search with 10-fold cross-validation. The **learning rate** (eta) will be evaluated across {0.01, 0.05, 0.1, 0.3}, controlling the contribution of each successive tree. The **maximum tree depth** will be evaluated across {3, 5, 7}, controlling model complexity. The **number of boosting rounds** (nrounds) will be determined using early stopping, training will halt when cross-validated AUC fails to improve for 10 consecutive rounds, preventing overfitting automatically.
+
+**Performance metrics:** AUC-ROC, Accuracy, Sensitivity, and Specificity on the test set. SHAP values will be computed post-hoc to provide interpretable feature attributions for the final boosted model, addressing the common criticism that ensemble methods are black boxes.
+
+### 7.6 Model Comparison Summary
+
+```{r model-comparison-table, echo=FALSE}
+tibble(
+  Model = c("Logistic Regression", "Elastic Net", 
+            "Random Forest", "Gradient Boosting"),
+  Type = c("Parametric / Linear", "Regularized linear", 
+           "Ensemble (bagging)", "Ensemble (boosting)"),
+  `Preprocessing needed` = c(
+    "Dummy encoding, Age standardization",
+    "Dummy encoding, Age standardization",
+    "None handles factors natively",
+    "Integer / dummy encoding"
+  ),
+  `Key tuning parameters` = c(
+    "None",
+    "alpha (0–1), lambda (grid)",
+    "mtry (2–10), ntree = 500",
+    "eta, max_depth, nrounds (early stopping)"
+  ),
+  `Tuning method` = c(
+    "No tuning required",
+    "10-fold CV via cv.glmnet",
+    "10-fold CV via caret",
+    "10-fold CV with early stopping"
+  ),
+  `Primary metric` = c(
+    "AUC-ROC", "AUC-ROC", "AUC-ROC", "AUC-ROC"
+  )
+) %>%
+  kbl(caption = "Summary of planned models and methodological approach") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = TRUE, font_size = 13) %>%
+  row_spec(0, bold = TRUE, background = "#2E86AB", color = "white") %>%
+  column_spec(1, bold = TRUE) %>%
+  column_spec(3, italic = TRUE, color = "gray40") %>%
+  row_spec(1, background = "#F9F9F9") %>%
+  row_spec(2, background = "#EBF5FB") %>%
+  row_spec(3, background = "#F9F9F9") %>%
+  row_spec(4, background = "#EBF5FB")
+```
