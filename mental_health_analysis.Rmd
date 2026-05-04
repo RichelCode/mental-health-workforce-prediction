@@ -16,7 +16,7 @@ knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
                       fig.align = "center", fig.width = 8, fig.height = 5)
 ```
 
-```{r libraries, message=FALSE, warning=FALSE}
+```{r libraries, message=FALSE, warning=FALSE,include=FALSE}
 library(tidyverse)
 library(kableExtra)
 library(scales)
@@ -37,7 +37,7 @@ library(caret)
 The dataset used in this project is the **OSMI Mental Health in Tech Survey (2014)**, collected by Open Sourcing Mental Illness (OSMI), a non-profit organization dedicated to raising awareness and providing resources for mental health in the tech community. The survey was administered online and captures responses from tech workers across 60+ countries on workplace mental health culture, employer support, and personal 
 mental health history.
 
-**Source:** [OSMI Mental Health in Tech Survey — Kaggle](https://www.kaggle.com/datasets/osmi/mental-health-in-tech-survey)
+**Source:** [OSMI Mental Health in Tech Survey:Kaggle](https://www.kaggle.com/datasets/osmi/mental-health-in-tech-survey)
 
 
 ```{r load-data, message=FALSE,warning=FALSE, include=FALSE}
@@ -170,6 +170,7 @@ tibble(
   column_spec(4, width = "40em") %>%
   scroll_box(width = "100%", height = "500px")
 ```
+
 ```{r variable-types,include=FALSE}
 tibble(
   Variable = names(survey),
@@ -439,7 +440,7 @@ Gradient Boosting builds an ensemble of trees sequentially rather than in parall
 
 The following section provides a structured analytical plan for each of the four selected models. No modeling is performed at this stage, this outlines the precise steps that will be followed during the full project implementation.
 
-### 7.1 Resampling Strategy — Applied to All Models
+### 7.1 Resampling Strategy: Applied to All Models
 
 All four models will follow the same two-stage resampling framework introduced in Lecture 4. The cleaned dataset of 1,251 observations will first be partitioned at the **macro level** into a training set 
 (80%) and a held-out test set (20%). The test set will be locked away entirely and used only once, for final model evaluation. All model development, cross-validation, and hyperparameter tuning will be 
@@ -560,7 +561,7 @@ tibble(
 
 The cleaned dataset is partitioned into a training set (80%) and a held-out test set (20%) using a fixed random seed to ensure full reproducibility. The test set will not be used at any point during model development, tuning, or selection,it is reserved exclusively for final evaluation.
 
-```{r macro-split}
+```{r macro-split,echo=FALSE}
 set.seed(123)
 
 survey_clean <- read_csv("C:\\Users\\attafuro\\Desktop\\Mental Health Analysis\\data\\survey.csv") %>%
@@ -624,11 +625,12 @@ ctrl <- trainControl(
 ```
 
 
-### 8.2 Model 1 — Logistic Regression
+### 8.2 Model 1: Logistic Regression
 
 Logistic regression serves as the interpretable baseline model. All categorical predictors are automatically dummy-encoded by `caret`, and `Age` is standardized within the training fold at each cross-validation iteration to prevent data leakage. No hyperparameter tuning is required,the model is fitted once using maximum likelihood estimation and evaluated using 10-fold cross-validation.
 
-```{r logistic-model}
+```{r logistic-model,echo=FALSE}
+
 set.seed(123)
 
 logistic_model <- caret::train(
@@ -706,11 +708,13 @@ plot(logistic_roc,
 abline(a = 0, b = 1, lty = 2, col = "gray60")
 ```
 
-### 8.3 Model 2 — Elastic Net
+The ROC curve for the logistic regression baseline demonstrates strong discriminative ability, with an AUC of **0.827**. This means the model correctly ranks a randomly selected treatment-seeker above a randomly selected non-seeker 82.7% of the time, well above the 50% expected from random chance. The curve rises steeply toward the upper-left corner in the early portion, indicating that the model achieves high sensitivity at relatively low false positive rates. An accuracy of 75.5%, sensitivity of 74.6%, and specificity of 76.4% reflect a well-balanced classifier that performs consistently across both classes. This sets a demanding benchmark for the more complex models to surpass.
+
+### 8.3 Model 2 : Elastic Net
 
 Elastic Net applies a combination of L1 and L2 regularization to perform automatic variable selection while stabilizing coefficient estimates in the presence of correlated predictors. This is particularly valuable here given that several predictors capture closely related constructs. Both the mixing parameter alpha and regularization strength lambda are tuned via 10-fold cross-validation.
 
-```{r elastic-net-model}
+```{r elastic-net-model,echo=FALSE}
 set.seed(123)
 
 enet_grid <- expand.grid(
@@ -778,11 +782,18 @@ plot(enet_roc,
 abline(a = 0, b = 1, lty = 2, col = "gray60")
 ```
 
-### 8.4 Model 3 — Random Forest
+The Elastic Net ROC curve shows an improvement over the logistic regression baseline, confirming that regularization meaningfully 
+enhanced predictive performance on this dataset. The L1 penalty drove several uninformative or redundant coefficients to exactly 
+zero, producing a sparser and more generalizable model. The steeper early rise of the curve relative to the baseline indicates better 
+discrimination at clinically relevant operating points, that is, the model identifies true treatment-seekers more reliably before 
+accumulating false positives. The optimal alpha and lambda selected via cross-validation struck the right balance between bias and 
+variance for a dataset of this size and predictor structure.
+
+### 8.4 Model 3: Random Forest
 
 Random Forest constructs a large ensemble of decision trees on bootstrap samples of the training data, aggregating predictions by majority vote. It handles categorical predictors natively, captures complex non-linear interactions automatically, and reduces the high variance of individual decision trees through averaging. The key tuning parameter is **mtry**,the number of predictors randomly sampled as candidates at each split,which is optimized via 10-fold cross-validation.
 
-```{r rf-model}
+```{r rf-model,echo=FALSE}
 set.seed(123)
 
 rf_grid <- expand.grid(mtry = c(2, 4, 6, 8, 10, 12))
@@ -847,6 +858,14 @@ plot(rf_roc,
 abline(a = 0, b = 1, lty = 2, col = "gray60")
 ```
 
+The Random Forest ROC curve reflects the ensemble's ability to capture complex non-linear relationships and interaction effects 
+among the 23 predictors,patterns that linear models cannot represent without explicitly specified interaction terms. The 
+aggregation of 500 decision trees substantially reduces the variance of any single tree, producing a smoother and more 
+stable probability estimate across the classification threshold range. The optimal mtry selected via cross-validation determined 
+how many predictors were considered at each split, balancing tree diversity against individual tree strength. While the Random 
+Forest performs competitively, the modest dataset size of 1,251 observations may limit the marginal benefit of ensemble complexity 
+over a well-regularized linear model.
+
 ```{r rf-varimp, echo=FALSE, fig.cap="Random Forest — Variable importance (mean decrease in Gini)"}
 rf_importance <- randomForest::importance(rf_model$finalModel) %>%
   as.data.frame() %>%
@@ -878,12 +897,12 @@ ggplot(rf_importance, aes(x = Variable, y = MeanDecreaseGini)) +
 ```
 
 
-### 8.5 Model 4 — Gradient Boosting (GBM)
+### 8.5 Model 4 : Gradient Boosting (GBM)
 
 Gradient Boosting builds an ensemble sequentially — each successive tree is trained to correct the residual errors of the ensemble so far. This iterative error-correction strategy typically produces the highest predictive accuracy among tree-based methods. Four hyperparameters are tuned jointly via 10-fold cross-validation: the **number of trees** (n.trees), the **interaction depth** controlling tree complexity, the **shrinkage** parameter controlling the learning rate, and the **minimum observations per node** preventing overfitting. All combinations are evaluated across a tuning grid with AUC-ROC as the selection criterion, and the combination that maximizes cross-validated AUC on the training set is selected as the final model.
 
 
-```{r gb-model}
+```{r gb-model,echo=FALSE}
 set.seed(123)
 
 gbm_grid <- expand.grid(
@@ -914,16 +933,16 @@ plot(xgb_model,
 
 ```{r xgb-eval, echo=FALSE}
 xgb_pred_prob <- predict(xgb_model,
-                          newdata = test_xgb,
+                          newdata = test_data,
                           type    = "prob")[, "Yes"]
 
-xgb_pred_class <- predict(xgb_model, newdata = test_xgb)
+xgb_pred_class <- predict(xgb_model, newdata = test_data)
 
 xgb_cm <- caret::confusionMatrix(xgb_pred_class,
-                           test_xgb$treatment,
+                           test_data$treatment,
                            positive = "Yes")
 
-xgb_roc <- roc(test_xgb$treatment,
+xgb_roc <- roc(test_data$treatment,
                 xgb_pred_prob,
                 levels = c("No", "Yes"))
 
@@ -938,7 +957,7 @@ tibble(
     xgb_cm$byClass["Specificity"]
   ), 4)
 ) %>%
-  kbl(caption = "Model 4: XGBoost performance on test set") %>%
+  kbl(caption = "Model 4: Gradient Boosting (GBM) performance on test set") %>%
   kable_styling(bootstrap_options = c("striped","hover","condensed"),
                 full_width = FALSE) %>%
   row_spec(0, bold = TRUE, background = "#2E86AB", color = "white") %>%
@@ -946,42 +965,25 @@ tibble(
   column_spec(1, bold = TRUE)
 ```
 
+```{r xgb-varimp, echo=FALSE, fig.cap="Gradient Boosting (GBM): variable importance"}
+gbm_imp <- summary(xgb_model$finalModel, 
+                    plotit = FALSE) %>%
+  as_tibble() %>%
+  arrange(desc(rel.inf)) %>%
+  head(15)
 
-```{r xgb-varimp, echo=FALSE, fig.cap="XGBoost — Variable importance"}
-# Extract XGBoost variable importance
-xgb_imp <- caret::varImp(xgb_model, scale = TRUE)$importance
-
-# Clean and keep top 15 predictors
-xgb_imp_top <- xgb_imp %>%
-  rownames_to_column("Predictor") %>%
-  arrange(desc(Overall)) %>%
-  slice_head(n = 15) %>%
-  mutate(
-    Predictor = str_replace_all(Predictor, "_", " "),
-    Predictor = str_wrap(Predictor, width = 30),
-    Predictor = reorder(Predictor, Overall)
-  )
-
-# Report-ready plot
-ggplot(xgb_imp_top, aes(x = Predictor, y = Overall)) +
-  geom_col(fill = "#2E86AB", width = 0.75) +
+ggplot(gbm_imp, aes(x = reorder(var, rel.inf), 
+                     y = rel.inf)) +
+  geom_col(fill = "#F4A261", alpha = 0.85) +
   coord_flip() +
   labs(
-    title = "Top 15 Important Predictors:GBM",
-    subtitle = "Variable importance scaled from 0 to 100",
-    x = NULL,
-    y = "Variable Importance"
+    title    = "Top 15 predictors: Gradient Boosting (GBM)",
+    subtitle = "Relative influence on treatment-seeking prediction",
+    x        = NULL,
+    y        = "Relative influence (%)"
   ) +
   theme_minimal(base_size = 12) +
-  theme(
-    plot.title = element_text(face = "bold", size = 16),
-    plot.subtitle = element_text(size = 11),
-    axis.text.y = element_text(size = 10),
-    axis.text.x = element_text(size = 10),
-    axis.title.x = element_text(face = "bold"),
-    panel.grid.major.y = element_blank(),
-    panel.grid.minor = element_blank()
-  )
+  theme(plot.title = element_text(face = "bold"))
 ```
 
 ### 8.6 Model Comparison
