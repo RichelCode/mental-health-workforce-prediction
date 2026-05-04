@@ -1,6 +1,6 @@
 ---
 title: "Mental Health Treatment Prediction in the Workplace"
-subtitle: "Preparation 1: Data Selection and Initial Preprocessing"
+subtitle: "Preparation 1 & 2: Data Preprocessing and Modeling Plan"
 author: "Richel Attafuah"
 date: "April 2026"
 output:
@@ -16,10 +16,20 @@ knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
                       fig.align = "center", fig.width = 8, fig.height = 5)
 ```
 
-```{r libraries, message=FALSE, warning=FALSE,include=FALSE}
+```{r libraries, message=FALSE, warning=FALSE}
 library(tidyverse)
 library(kableExtra)
 library(scales)
+library(tidyverse)
+library(kableExtra)
+library(caret)
+library(glmnet)
+library(randomForest)
+library(xgboost)
+library(pROC)
+library(rpart)
+library(rpart.plot)
+library(caret)
 ```
 
 ## 1. Data Overview & Source
@@ -31,7 +41,7 @@ mental health history.
 
 
 ```{r load-data, message=FALSE,warning=FALSE, include=FALSE}
-survey <- read_csv("data/survey.csv")
+survey <- read_csv("C:\\Users\\attafuro\\Desktop\\Mental Health Analysis\\data\\survey.csv")
 dim(survey)
 glimpse(survey)
 ```
@@ -41,7 +51,7 @@ glimpse(survey)
 The response variable for this project is **`treatment`** ,  a binary variable indicating whether a tech worker has sought mental health treatment (Yes/No). This is a **Classification** problem. The goal is to predict the probability that a 
 tech worker seeks mental health treatment based on workplace environment, employee support policies, and personal background factors.
 
-```{r response-var}
+```{r response-var,echo=FALSE}
 survey %>%
   count(treatment) %>%
   mutate(proportion = round(n / sum(n), 3)) %>%
@@ -59,7 +69,7 @@ survey %>%
 The dataset contains **1,259 respondents** and **27 variables**. After removing non-informative columns (`Timestamp`, `state`, `comments`), we retain **24 predictors**.The dataset comfortably exceeds the 8–10 predictor requirement.
 
 
-```{r eda-structure}
+```{r eda-structure,echo=FALSE}
 survey %>%
   summarise(
     total_variables = ncol(.),
@@ -74,7 +84,93 @@ survey %>%
 
 ### 3.2 Variable Types
 
-```{r variable-types}
+### 3.2.1 Variable Descriptions
+
+The OSMI Mental Health in Tech Survey captures a rich set of workplace, organizational, and personal factors that may influence whether a tech worker seeks mental health treatment. The dataset contains one continuous numeric predictor (Age), one engineered categorical predictor (Gender), and 21 additional categorical predictors covering employer policies, workplace culture, and personal mental health history. The response variable, `treatment`, is a binary indicator of whether the respondent has ever sought professional mental health treatment.
+Understanding each variable is essential before modeling, several predictors capture closely related constructs (e.g. `mental_health_consequence` and `obs_consequence`) that may exhibit multicollinearity, and ordered categorical variables such as `work_interfere` and `leave` will require special attention during feature engineering to preserve their natural 
+ordering.
+
+```{r data-dictionary,echo=FALSE}
+tibble(
+  Variable = c(
+    "treatment", "Age", "Gender", "Country", "self_employed",
+    "family_history", "work_interfere", "no_employees", "remote_work",
+    "tech_company", "benefits", "care_options", "wellness_program",
+    "seek_help", "anonymity", "leave", "mental_health_consequence",
+    "phys_health_consequence", "coworkers", "supervisor",
+    "mental_health_interview", "phys_health_interview",
+    "mental_vs_physical", "obs_consequence"
+  ),
+  Role = c(
+    "Response",
+    rep("Predictor", 23)
+  ),
+  Type = c(
+    "Binary factor",
+    "Numeric (continuous)",
+    "Categorical factor (3 levels)",
+    "Categorical factor",
+    "Binary factor",
+    "Binary factor",
+    "Ordinal factor (4 levels)",
+    "Ordinal factor (6 levels)",
+    "Binary factor",
+    "Binary factor",
+    "Categorical factor (3 levels)",
+    "Categorical factor (3 levels)",
+    "Categorical factor (3 levels)",
+    "Categorical factor (3 levels)",
+    "Categorical factor (3 levels)",
+    "Ordinal factor (5 levels)",
+    "Categorical factor (3 levels)",
+    "Categorical factor (3 levels)",
+    "Categorical factor (3 levels)",
+    "Categorical factor (3 levels)",
+    "Categorical factor (3 levels)",
+    "Categorical factor (3 levels)",
+    "Categorical factor (3 levels)",
+    "Binary factor"
+  ),
+  Description = c(
+    "Whether the respondent has ever sought professional mental health treatment (Yes / No)",
+    "Age of the respondent in years. Cleaned to retain only plausible values between 18 and 75",
+    "Gender identity of the respondent. Raw entries were standardized into three categories: Male, Female, and Other",
+    "Country of residence or employment of the respondent",
+    "Whether the respondent is self-employed (Yes / No)",
+    "Whether the respondent has a family history of mental illness (Yes / No)",
+    "How often mental health conditions interfere with work when untreated (Never / Rarely / Sometimes / Often)",
+    "Number of employees at the respondent's company (1–5 / 6–25 / 26–100 / 100–500 / 500–1000 / More than 1000)",
+    "Whether the respondent works remotely at least 50% of the time (Yes / No)",
+    "Whether the respondent's employer is primarily a tech company or organization (Yes / No)",
+    "Whether the employer provides mental health benefits as part of health coverage (Yes / No / Don't know)",
+    "Whether the respondent is aware of mental health care options provided by their employer (Yes / No / Not sure)",
+    "Whether the employer has formally discussed mental health as part of a wellness program (Yes / No / Don't know)",
+    "Whether the employer provides resources to learn about mental health issues and how to seek help (Yes / No / Don't know)",
+    "Whether anonymity is protected if the respondent chooses to use mental health or substance abuse treatment resources (Yes / No / Don't know)",
+    "How easy it is to take medical leave for a mental health condition (Very easy / Somewhat easy / Don't know / Somewhat difficult / Very difficult)",
+    "Whether the respondent believes discussing a mental health issue with their employer would have negative consequences (Yes / No / Maybe)",
+    "Whether the respondent believes discussing a physical health issue with their employer would have negative consequences (Yes / No / Maybe)",
+    "Whether the respondent would be comfortable discussing a mental health issue with their coworkers (Yes / No / Some of them)",
+    "Whether the respondent would be comfortable discussing a mental health issue with their direct supervisor (Yes / No / Some of them)",
+    "Whether the respondent would bring up a mental health issue in a job interview (Yes / No / Maybe)",
+    "Whether the respondent would bring up a physical health issue in a job interview (Yes / No / Maybe)",
+    "Whether the respondent feels their employer takes mental health as seriously as physical health (Yes / No / Don't know)",
+    "Whether the respondent has heard of or observed negative consequences for coworkers who disclosed mental health issues (Yes / No)"
+  )
+) %>%
+  kbl(caption = "Data dictionary — full variable inventory with descriptions",
+      col.names = c("Variable", "Role", "Type", "Description")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = TRUE, font_size = 13) %>%
+  row_spec(0, bold = TRUE, background = "#2E86AB", color = "white") %>%
+  row_spec(1, background = "#D4EDDA", bold = TRUE) %>%
+  column_spec(1, bold = TRUE, monospace = TRUE, width = "14em") %>%
+  column_spec(2, width = "7em") %>%
+  column_spec(3, width = "16em", italic = TRUE, color = "gray40") %>%
+  column_spec(4, width = "40em") %>%
+  scroll_box(width = "100%", height = "500px")
+```
+```{r variable-types,include=FALSE}
 tibble(
   Variable = names(survey),
   Type     = sapply(survey, class),
@@ -88,7 +184,7 @@ tibble(
 
 ### 3.3 Response Variable Distribution
 
-```{r response-plot, fig.align='center'}
+```{r response-plot, fig.align='center',echo=FALSE}
 survey %>%
   count(treatment) %>%
   mutate(proportion = round(n / sum(n), 3)) %>%
@@ -98,15 +194,20 @@ survey %>%
             vjust = -0.5, size = 4) +
   scale_fill_manual(values = c("Yes" = "#2E86AB", "No" = "#A8DADC")) +
   labs(title    = "Distribution of mental health treatment-seeking",
-       subtitle = "Nearly balanced classes — no resampling correction needed",
+       subtitle = "Nearly balanced classes: no resampling correction needed",
        x        = "Sought treatment",
        y        = "Count") +
   theme_minimal(base_size = 13)
 ```
 
+
+The response variable `treatment` is remarkably well-balanced, with **637 respondents (50.6%)** reporting that they have sought mental health treatment and **622 (49.4%)** reporting that they have not. This near-perfect class balance is a favorable property for classification modeling ,it means that a naive classifier that predicts the majority class every time would achieve only around 50% accuracy, giving our models a meaningful benchmark to surpass. Crucially, it also means that standard evaluation metrics such as accuracy are not misleading here, and no resampling corrections such as 
+SMOTE or class weighting will be necessary.
+The balance also carries a substantive interpretation: mental health treatment-seeking is not a rare behavior in the tech workforce. Roughly half of survey respondents have sought professional help at some point, suggesting that the barriers to treatment are not insurmountable, but that meaningful variation exists in who chooses to seek help. This is precisely what makes the prediction task interesting and the resulting model actionable for employers and HR teams designing targeted mental health programs.
+
 ### 3.4 Missing Data Overview
 
-```{r missing-data}
+```{r missing-data,echo=FALSE}
 survey %>%
   summarise(across(everything(), ~ sum(is.na(.)))) %>%
   pivot_longer(everything(), names_to = "Variable", values_to = "Missing") %>%
@@ -119,9 +220,19 @@ survey %>%
   row_spec(0, bold = TRUE, background = "#2E86AB", color = "white")
 ```
 
+Only four variables in the dataset contained missing values, and the pattern of missingness is both interpretable and manageable. The `comments` field, which captured open-ended free-text responses, was missing for **87.1% of 
+respondents**  this is entirely expected, as open-ended fields are rarely completed in voluntary surveys and carry no predictive value in a structured modeling context. It has been dropped from the analysis entirely. Similarly, `state` was missing for **40.9%** of respondents, largely because the question was only applicable to those based in the United States, retaining it would introduce substantial bias and noise, and it has likewise been removed.
+
+The remaining two variables with missing data present no serious concern.`work_interfere` one of the most substantively important predictors in this dataset, capturing how frequently mental health conditions interfere with work, was missing for **21.0%** of respondents. Rather than discard these observations or the variable itself, missing values were imputed using the mode of the observed responses, preserving the full sample size and retaining this critical predictor. `self_employed` was missing for just **1.4%** of respondents and was handled identically.
+
+Importantly, after applying these targeted remediation strategies, **zero missing values remain** across all 24 variables in the cleaned dataset. The decision to impute rather than drop reflects a deliberate effort to retain as many observations as possible for modeling, particularly given that the original sample of 1,259 respondents is already modest in size.
+
 ## 4. Initial Preprocessing & Cleaning
 
 ### 4.1 Drop non-informative variables
+
+Before modeling can begin, three variables were removed from the dataset entirely. `Timestamp` records the date and time the survey was submitted and carries no information about a respondent's likelihood of seeking mental health treatment. `state` was retained in the raw data long enough to assess its missingness, which at 40.9% was too severe to recover 
+through imputation. `comments` was a free-text field left blank by 87.1% of respondents, and even where populated, unstructured text cannot be used directly in the models planned for this project. Removing these three columns reduces the variable count from 27 to 24, leaving a clean set of 23 predictors and one response variable.
 
 ```{r drop-cols,include=FALSE}
 survey_clean <- survey %>%
@@ -132,7 +243,7 @@ dim(survey_clean)
 
 ### 4.2 Clean the Gender variable
 
-```{r clean-gender}
+```{r clean-gender,echo=FALSE}
 survey_clean <- survey_clean %>%
   mutate(Gender = case_when(
     str_to_lower(Gender) %in% c("male", "m", "man", "cis male",
@@ -155,18 +266,49 @@ survey_clean %>%
 
 ### 4.3 Fix Age outliers
 
-```{r clean-age,include=FALSE}
-# Inspect Age range before cleaning
-summary(survey_clean$Age)
+The `Age` variable contained severely implausible values prior to cleaning. The table below shows the distributional summary before and after restricting the variable to the plausible working-age range of 18 to 75 years.
 
-# Remove implausible ages (keep 18-75)
+```{r clean-age,echo=FALSE}
+before_summary <- survey_clean %>%
+  summarise(
+    Min    = min(Age),
+    Q1     = quantile(Age, 0.25),
+    Median = median(Age),
+    Mean   = round(mean(Age), 1),
+    Q3     = quantile(Age, 0.75),
+    Max    = max(Age)
+  )
+
 survey_clean <- survey_clean %>%
   filter(Age >= 18, Age <= 75)
 
-summary(survey_clean$Age)
+after_summary <- survey_clean %>%
+  summarise(
+    Min    = min(Age),
+    Q1     = quantile(Age, 0.25),
+    Median = median(Age),
+    Mean   = round(mean(Age), 1),
+    Q3     = quantile(Age, 0.75),
+    Max    = max(Age)
+  )
+
+bind_rows(
+  before_summary %>% mutate(Stage = "Before cleaning"),
+  after_summary  %>% mutate(Stage = "After cleaning")
+) %>%
+  select(Stage, everything()) %>%
+  kbl(caption = "Age variable summary — before and after outlier removal") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE) %>%
+  row_spec(0, bold = TRUE, background = "#2E86AB", color = "white") %>%
+  row_spec(1, background = "#FDECEA", bold = FALSE) %>%
+  row_spec(2, background = "#D4EDDA", bold = FALSE) %>%
+  column_spec(1, bold = TRUE)
 ```
 
-### 4.4 Impute missing values
+The before-cleaning row reveals a minimum age of **−1,726** and a maximum exceeding **100 billion** , clear data entry errors with no plausible real-world interpretation. After filtering to ages 18–75, only **8 observations** were removed, and the core distribution remained virtually unchanged, confirming these were isolated anomalies rather than a systemic data quality issue.
+
+
 
 ```{r impute-missing,include=FALSE}
 # Impute work_interfere and self_employed with mode
@@ -187,7 +329,6 @@ survey_clean <- survey_clean %>%
 colSums(is.na(survey_clean))
 ```
 
-### 4.5 Convert characters to factors
 
 ```{r factorize,include=FALSE}
 survey_clean <- survey_clean %>%
@@ -199,9 +340,7 @@ glimpse(survey_clean)
 ### 4.6 Final cleaned dataset summary
 
 
-```{r final-summary}
-dim(survey_clean)
-
+```{r final-summary,echo=FALSE}
 survey_clean %>%
   summarise(
     n_observations = n(),
@@ -214,4 +353,888 @@ survey_clean %>%
   kable_styling(bootstrap_options = c("striped","hover","condensed"),
                 full_width = FALSE) %>%
   row_spec(0, bold = TRUE, background = "#2E86AB", color = "white")
+```
+
+## 5. Next Steps
+
+### 5.1 Modeling Strategy
+
+Having established a clean, well-structured dataset of **1,251 observations** across **23 predictors**, this project will proceed to the full predictive modeling pipeline. All subsequent modeling will be performed on `survey_clean.csv` 
+to ensure a fully reproducible workflow.
+
+The central modeling question is:
+
+> *Can we accurately predict whether a tech worker will seek mental health 
+> treatment based on their workplace environment, employer policies, and 
+> personal background?*
+
+### 5.2 Macro/Micro Resampling Framework
+
+Following the two-stage resampling methodology introduced in Lecture 4, the data will be partitioned into a **macro holdout test set** (held out entirely until final evaluation) and a **micro training set** on which all model development, cross-validation, and hyperparameter tuning will be conducted. This approach ensures that our final performance estimates are honest and generalizable, the test set will never influence any modeling decision.
+
+### 5.3 Model Selection Rationale
+
+Five model types have been selected to represent a diverse range of statistical learning approaches. The choice of models was deliberately informed by the structure of this dataset, where **23 of 24 predictors are 
+categorical**. Distance-based methods such as K-Nearest Neighbors were excluded because Euclidean distance is not meaningful for factor variables. A Decision Tree was selected in their place, as tree-based methods handle categorical predictors naturally and produce interpretable decision rules,a particularly valuable property in healthcare contexts where model transparency matters.
+
+The five planned models are:
+
+- **Logistic Regression** will serve as the interpretable baseline. It requires no tuning, is well-understood, and establishes the performance floor against which all other models will be compared.
+
+- **Elastic Net (Lasso/Ridge)** will apply shrinkage-based regularization for automatic variable selection. The mixing parameter alpha and regularization strength lambda will be tuned via cross-validation,allowing the model to select the most informative predictors from the full set of 23.
+
+- **Decision Tree** will provide a single, fully interpretable tree-based model. The tree depth and complexity parameter (cp) will be tuned to balance fit and parsimony, and the resulting tree will be visualized to extract meaningful decision rules.
+
+- **Random Forest** will extend the single tree to a bagging ensemble of hundreds of trees, capturing complex non-linear interactions among predictors. The number of predictors sampled at each split (mtry) will be tuned via cross-validation.
+
+- **Gradient Boosting (GBM)** will apply a sequential boosting strategy that iteratively corrects prediction errors. Key 
+hyperparameters : learning rate, maximum tree depth, and number of 
+boosting rounds : will be tuned systematically.
+
+### 5.4 Evaluation Framework
+
+All models will be evaluated on the held-out macro test set using four metrics reported together: **AUC-ROC**, **Accuracy**, **Sensitivity**,and **Specificity**. AUC-ROC will serve as the primary model selection 
+criterion, as it evaluates performance across all classification thresholds rather than at a single cutoff.
+
+**Sensitivity** is given particular importance in this context. In a mental health setting, failing to identify an individual who would benefit from treatment,  a false negative carries a higher real-world cost than an 
+unnecessary positive flag. A model that maximizes sensitivity ensures fewer at-risk individuals are missed.
+
+
+---
+
+## 6. Model Selection & Justification
+
+This project investigates a **binary classification problem**, predicting whether a tech worker seeks mental health treatment (Yes/No), using a dataset of 1,251 observations and 23 predictors, of which 22 are categorical and one is continuous. Four model types were selected to represent a deliberately diverse range of statistical learning approaches, spanning interpretable parametric models, regularized regression, and both single and ensemble tree-based methods. Each model was chosen not only 
+for its methodological distinctiveness but for its specific suitability to the structure of this dataset.
+
+### 6.1 Logistic Regression
+
+Logistic regression is the natural starting point for any binary classification problem. As a generalized linear model, it estimates the log-odds of treatment-seeking as a linear combination of the 
+predictors, producing output that is directly interpretable as probability. Its greatest strength in this context is transparency,each coefficient carries a clear and communicable meaning, which 
+matters in a healthcare setting where stakeholders need to understand not just what the model predicts, but why.
+Logistic regression also serves an important methodological role as the **performance baseline**. If more complex models cannot meaningfully outperform a well-fitted logistic regression, that is itself a 
+substantively important finding. Given the categorical nature of the predictors, logistic regression with dummy-encoded factors is entirely appropriate and will serve as the benchmark against which all other models are evaluated.
+
+### 6.2 Elastic Net (Lasso / Ridge Regularization)
+
+With 23 predictors,several of which capture closely related constructs such as mental_health_consequence` and `obs_consequence`, there is a meaningful risk of multicollinearity inflating coefficient estimates in an unregularized logistic regression. Elastic Net addresses this directly by applying a combination of L1 (Lasso) and L2 (Ridge) penalties to shrink or eliminate redundant predictors.
+The Lasso component performs automatic variable selection by driving the coefficients of uninformative predictors to exactly zero, producing a sparse and interpretable model. The Ridge component stabilizes 
+coefficient estimates in the presence of correlated predictors. The mixing parameter alpha, which governs the balance between these two penalties, and the regularization strength lambda will both be tuned via cross-validation. Elastic Net is chosen over standalone Lasso or Ridge because it offers the flexibility to adapt to the degree of sparsity and correlation present in the data, rather than assuming either in advance.
+
+### 6.3 Random Forest
+
+Random Forest is a bagging ensemble that constructs a large number of decision trees on bootstrap samples of the training data and aggregates their predictions by majority vote. By averaging across hundreds of diverse trees, it substantially reduces the variance that plagues individual decision trees without introducing the bias of linear models.
+Random Forest is particularly well-suited to this dataset for two reasons. First, tree-based methods handle categorical predictors naturally, without requiring the assumption of linearity or the 
+explicit creation of distance metrics. Second, Random Forest automatically captures non-linear relationships and interaction effects, for example, the combined effect of `family_history` and 
+`work_interfere` on treatment-seeking, that a logistic regression would miss unless interaction terms were explicitly specified. Variable importance measures produced by the Random Forest will also provide 
+interpretable insight into which predictors drive prediction most strongly.
+
+### 6.4 Gradient Boosting (GBM)
+
+Gradient Boosting builds an ensemble of trees sequentially rather than in parallel, with each successive tree trained to correct the residual errors of the ensemble so far. This iterative error-correction strategy typically produces higher predictive accuracy than bagging approaches, at the cost of greater sensitivity to hyperparameter choices and a higher risk of overfitting if not carefully tuned.GBM is included because it represents a methodologically distinct approach from Random Forest,boosting versus bagging, and consistently ranks among the highest-performing algorithms in applied classification tasks. Its inclusion allows a direct empirical comparison between the two dominant ensemble paradigms. Unlike Random Forest, which builds all trees independently and averages their results, GBM builds each tree specifically to reduce the mistakes of the previous ensemble. The learning rate, interaction depth, number of boosting rounds, and minimum observations per node will all be tuned systematically via cross-validation to ensure the model generalizes well to unseen data rather than memorizing the training set.
+
+---
+
+## 7. Methodological Outlines
+
+The following section provides a structured analytical plan for each of the four selected models. No modeling is performed at this stage, this outlines the precise steps that will be followed during the full project implementation.
+
+### 7.1 Resampling Strategy — Applied to All Models
+
+All four models will follow the same two-stage resampling framework introduced in Lecture 4. The cleaned dataset of 1,251 observations will first be partitioned at the **macro level** into a training set 
+(80%) and a held-out test set (20%). The test set will be locked away entirely and used only once, for final model evaluation. All model development, cross-validation, and hyperparameter tuning will be 
+conducted exclusively on the training set using **10-fold cross-validation** at the **micro level**. This two-stage design ensures that reported test set performance is a genuine out-of-sample estimate, uncontaminated by any modeling decisions.
+
+```{r resampling-diagram, echo=FALSE}
+tibble(
+  Stage = c("Macro split", "Macro split", "Micro level", "Micro level"),
+  Partition = c("Training set", "Test set (holdout)",
+                "Cross-validation folds", "Validation fold"),
+  Proportion = c("80% (approx. 1,001 obs.)", "20% (approx. 250 obs.)",
+                 "9 folds used for fitting", "1 fold used for evaluation"),
+  Purpose = c(
+    "All model training, tuning, and selection",
+    "Final evaluation only,never used during development",
+    "Rotated across 10 iterations for each model",
+    "Produces unbiased estimate of tuning performance"
+  )
+) %>%
+  kbl(caption = "Two-stage resampling framework") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = TRUE) %>%
+  row_spec(0, bold = TRUE, background = "#2E86AB", color = "white") %>%
+  row_spec(1, background = "#E8F4F8") %>%
+  row_spec(2, background = "#FDECEA") %>%
+  row_spec(3:4, background = "#F9F9F9") %>%
+  column_spec(1, bold = TRUE) %>%
+  column_spec(4, italic = TRUE, color = "gray40")
+```
+
+### 7.2 Logistic Regression
+
+**Model-specific preprocessing:** All categorical predictors will be dummy-encoded using treatment contrasts, with one level dropped per variable to avoid perfect multicollinearity. The continuous predictor `Age` will be standardized to zero mean and unit variance to ensure coefficient comparability. No variable selection will be applied at this stage, all 23 predictors will enter the model to establish a full baseline.
+
+**Hyperparameter tuning:** Logistic regression contains no hyperparameters requiring tuning. The model will be fitted once on the full training set using maximum likelihood estimation.
+
+**Performance metrics:** Accuracy, AUC-ROC, Sensitivity, Specificity, and F1-Score will be computed on the held-out test set. The classification threshold will be set at 0.5 for accuracy-based metrics, with AUC-ROC evaluated across all thresholds.
+
+### 7.3 Elastic Net
+
+**Model-specific preprocessing:** Identical dummy encoding and Age standardization as logistic regression. Standardization is especially important here because the L1 and L2 penalties are scale-dependent,predictors on different scales would be penalized unequally without it.
+
+**Hyperparameter tuning:** Two hyperparameters will be tuned jointly via 10-fold cross-validation using `cv.glmnet`. The mixing parameter **alpha** (ranging from 0 = pure Ridge to 1 = pure Lasso) controls 
+the blend of penalties, and the regularization strength **lambda** controls the overall degree of shrinkage. A grid search across values of alpha in {0, 0.25, 0.5, 0.75, 1} and a sequence of lambda values generated automatically by `glmnet` will identify the optimal combination by minimizing cross-validated classification error.
+
+**Performance metrics:** Same as logistic regression. Additionally, the number of predictors retained (non-zero coefficients) at the optimal lambda will be reported to quantify the degree of variable 
+selection achieved.
+
+### 7.4 Random Forest
+
+**Model-specific preprocessing:** Random Forest requires no dummy encoding, factor variables are handled natively by the algorithm. 
+Age standardization is also unnecessary as tree-based splits are invariant to monotone transformations of predictors. The dataset will be passed in its cleaned factor format directly.
+
+**Hyperparameter tuning:** The primary tuning parameter is **mtry** , the number of predictors randomly sampled as candidates at each tree split. Values of mtry will be evaluated across a grid from 2 
+to 10 using 10-fold cross-validation, with AUC-ROC as the selection criterion. The number of trees will be set to 500, which is sufficient for stable ensemble estimates given the dataset size. 
+Minimum node size will also be explored as a secondary tuning parameter.
+
+**Performance metrics:** AUC-ROC, Accuracy, Sensitivity, and Specificity on the test set. Variable importance will be reported using mean decrease in Gini impurity to identify the most influential predictors in the final model.
+
+### 7.5 Gradient Boosting (GBM)
+
+**Model-specific preprocessing:** GBM handles factor predictors natively through caret's internal encoding, so no manual dummy encoding is required. Age will be left on its original scale as boosting algorithms are not sensitive to predictor scaling.
+
+**Hyperparameter tuning:** Four hyperparameters will be tuned jointly via 10-fold cross-validation. The **number of trees** (n.trees) controls how many sequential trees are built. The **interaction depth** controls the complexity of each tree. The **shrinkage** parameter (learning rate) controls how much each tree contributes to the ensemble, with smaller values requiring more trees but producing better generalization. The **minimum observations per node** prevents overfitting by controlling tree size. All combinations will be evaluated across a tuning grid with AUC-ROC as the selection criterion.
+
+**Resampling strategy:** 10-fold cross-validation on the training set, consistent with all other models.
+
+**Performance metrics:** AUC-ROC, Accuracy, Sensitivity, and Specificity on the held-out test set. Variable importance will be extracted post-fitting to identify the strongest predictors of treatment-seeking behavior.
+
+### 7.6 Model Comparison Summary
+
+```{r model-comparison-table, echo=FALSE}
+tibble(
+  Model = c("Logistic Regression", "Elastic Net", 
+            "Random Forest", "Gradient Boosting"),
+  Type = c("Parametric / Linear", "Regularized linear", 
+           "Ensemble (bagging)", "Ensemble (boosting)"),
+  `Preprocessing needed` = c(
+    "Dummy encoding, Age standardization",
+    "Dummy encoding, Age standardization",
+    "None handles factors natively",
+    "Integer / dummy encoding"
+  ),
+  `Key tuning parameters` = c(
+    "None",
+    "alpha (0–1), lambda (grid)",
+    "mtry (2–10), ntree = 500",
+    "eta, max_depth, nrounds (early stopping)"
+  ),
+  `Tuning method` = c(
+    "No tuning required",
+    "10-fold CV via cv.glmnet",
+    "10-fold CV via caret",
+    "10-fold CV with early stopping"
+  ),
+  `Primary metric` = c(
+    "AUC-ROC", "AUC-ROC", "AUC-ROC", "AUC-ROC"
+  )
+) %>%
+  kbl(caption = "Summary of planned models and methodological approach") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = TRUE, font_size = 13) %>%
+  row_spec(0, bold = TRUE, background = "#2E86AB", color = "white") %>%
+  column_spec(1, bold = TRUE) %>%
+  column_spec(3, italic = TRUE, color = "gray40") %>%
+  row_spec(1, background = "#F9F9F9") %>%
+  row_spec(2, background = "#EBF5FB") %>%
+  row_spec(3, background = "#F9F9F9") %>%
+  row_spec(4, background = "#EBF5FB")
+```
+
+---
+
+## 8. Predictive Modeling
+
+
+### 8.1 Macro/Micro Split
+
+The cleaned dataset is partitioned into a training set (80%) and a held-out test set (20%) using a fixed random seed to ensure full reproducibility. The test set will not be used at any point during model development, tuning, or selection,it is reserved exclusively for final evaluation.
+
+```{r macro-split}
+set.seed(123)
+
+survey_clean <- read_csv("C:\\Users\\attafuro\\Desktop\\Mental Health Analysis\\data\\survey.csv") %>%
+  mutate(Gender = case_when(
+    str_to_lower(Gender) %in% c("male", "m", "man", "cis male",
+                                 "male (cis)", "maile", "mal",
+                                 "make", "male ", "msle") ~ "Male",
+    str_to_lower(Gender) %in% c("female", "f", "woman", "cis female",
+                                 "female (cis)", "femail", "femake",
+                                 "female ") ~ "Female",
+    TRUE ~ "Other"
+  )) %>%
+  filter(Age >= 18, Age <= 75) %>%
+  select(-Timestamp, -state, -comments) %>%
+  mutate(
+    work_interfere = ifelse(is.na(work_interfere),
+                            "Sometimes", work_interfere),
+    self_employed  = ifelse(is.na(self_employed),
+                            "No", self_employed)
+  ) %>%
+  mutate(across(where(is.character), as.factor))
+
+# Macro split — 80% train, 20% test
+train_index <- createDataPartition(survey_clean$treatment, 
+                                   p = 0.80, 
+                                   list = FALSE)
+
+train_data <- survey_clean[ train_index, ]
+test_data  <- survey_clean[-train_index, ]
+```
+
+```{r split-summary, echo=FALSE}
+tibble(
+  Split    = c("Training set", "Test set (holdout)", "Total"),
+  N        = c(nrow(train_data), nrow(test_data), nrow(survey_clean)),
+  Pct      = c("80%", "20%", "100%"),
+  Purpose  = c("Model fitting, cross-validation, hyperparameter tuning",
+               "Final evaluation only, locked until all models are chosen",
+               "—")
+) %>%
+  kbl(caption = "Macro/Micro data partition summary",
+      col.names = c("Partition", "N", "%", "Purpose")) %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = TRUE) %>%
+  row_spec(0, bold = TRUE, background = "#2E86AB", color = "white") %>%
+  row_spec(1, background = "#D4EDDA") %>%
+  row_spec(2, background = "#FDECEA") %>%
+  row_spec(3, background = "#F9F9F9", bold = TRUE) %>%
+  column_spec(1, bold = TRUE)
+```
+
+```{r cv-setup, include=FALSE}
+# 10-fold cross-validation control — applied consistently to all models
+ctrl <- trainControl(
+  method          = "cv",
+  number          = 10,
+  classProbs      = TRUE,
+  summaryFunction = twoClassSummary,
+  savePredictions = TRUE
+)
+```
+
+
+### 8.2 Model 1 — Logistic Regression
+
+Logistic regression serves as the interpretable baseline model. All categorical predictors are automatically dummy-encoded by `caret`, and `Age` is standardized within the training fold at each cross-validation iteration to prevent data leakage. No hyperparameter tuning is required,the model is fitted once using maximum likelihood estimation and evaluated using 10-fold cross-validation.
+
+```{r logistic-model}
+set.seed(123)
+
+logistic_model <- caret::train(
+  treatment ~ .,
+  data      = train_data,
+  method    = "glm",
+  family    = "binomial",
+  metric    = "ROC",
+  trControl = ctrl,
+  preProcess = c("center", "scale")
+)
+
+logistic_model
+```
+
+```{r logistic-eval, echo=FALSE}
+# Predictions on test set
+logistic_pred_prob <- predict(
+  logistic_model, 
+  newdata = test_data, 
+  type = "prob"
+)[, "Yes"]
+
+logistic_pred_class <- predict(
+  logistic_model, 
+  newdata = test_data
+)
+
+# Make sure factor levels match
+test_data$treatment <- factor(test_data$treatment, levels = c("No", "Yes"))
+logistic_pred_class <- factor(logistic_pred_class, levels = c("No", "Yes"))
+
+# Confusion matrix
+logistic_cm <- caret::confusionMatrix(
+  data = logistic_pred_class,
+  reference = test_data$treatment,
+  positive = "Yes"
+)
+
+# AUC
+logistic_roc <- pROC::roc(
+  response = test_data$treatment,
+  predictor = logistic_pred_prob,
+  levels = c("No", "Yes")
+)
+
+logistic_auc <- as.numeric(pROC::auc(logistic_roc))
+
+# Results table
+tibble(
+  Metric = c("AUC-ROC", "Accuracy", "Sensitivity", "Specificity"),
+  Value  = round(c(
+    logistic_auc,
+    logistic_cm$overall["Accuracy"],
+    logistic_cm$byClass["Sensitivity"],
+    logistic_cm$byClass["Specificity"]
+  ), 4)
+) %>%
+  kbl(caption = "Model 1 — Logistic Regression performance on test set") %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE
+  ) %>%
+  row_spec(0, bold = TRUE, background = "#2E86AB", color = "white") %>%
+  row_spec(1, background = "#D4EDDA", bold = TRUE) %>%
+  column_spec(1, bold = TRUE)
+```
+
+```{r logistic-roc-plot, echo=FALSE, fig.cap="ROC curve — Logistic Regression"}
+plot(logistic_roc, 
+     col  = "#2E86AB", 
+     lwd  = 2,
+     main = paste("Logistic Regression — AUC =", 
+                  round(logistic_auc, 3)))
+abline(a = 0, b = 1, lty = 2, col = "gray60")
+```
+
+### 8.3 Model 2 — Elastic Net
+
+Elastic Net applies a combination of L1 and L2 regularization to perform automatic variable selection while stabilizing coefficient estimates in the presence of correlated predictors. This is particularly valuable here given that several predictors capture closely related constructs. Both the mixing parameter alpha and regularization strength lambda are tuned via 10-fold cross-validation.
+
+```{r elastic-net-model}
+set.seed(123)
+
+enet_grid <- expand.grid(
+  alpha  = c(0, 0.25, 0.5, 0.75, 1),
+  lambda = seq(0.001, 0.1, length.out = 20)
+)
+
+enet_model <- caret::train(
+  treatment ~ .,
+  data       = train_data,
+  method     = "glmnet",
+  metric     = "ROC",
+  trControl  = ctrl,
+  tuneGrid   = enet_grid,
+  preProcess = c("center", "scale")
+)
+
+# Best tuning parameters
+enet_model$bestTune
+```
+
+```{r elastic-net-plot, echo=FALSE, fig.cap="Elastic Net — Cross-validated AUC across tuning grid"}
+plot(enet_model, main = "Elastic Net hyperparameter tuning")
+```
+
+```{r elastic-net-eval, echo=FALSE}
+enet_pred_prob <- predict(enet_model,
+                           newdata = test_data,
+                           type    = "prob")[, "Yes"]
+
+enet_pred_class <- predict(enet_model, newdata = test_data)
+
+enet_cm <- caret::confusionMatrix(enet_pred_class,
+                            test_data$treatment,
+                            positive = "Yes")
+
+enet_roc <- roc(test_data$treatment,
+                 enet_pred_prob,
+                 levels = c("No", "Yes"))
+
+enet_auc <- as.numeric(auc(enet_roc))
+
+tibble(
+  Metric = c("AUC-ROC", "Accuracy", "Sensitivity", "Specificity"),
+  Value  = round(c(
+    enet_auc,
+    enet_cm$overall["Accuracy"],
+    enet_cm$byClass["Sensitivity"],
+    enet_cm$byClass["Specificity"]
+  ), 4)
+) %>%
+  kbl(caption = "Model 2 — Elastic Net performance on test set") %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = FALSE) %>%
+  row_spec(0, bold = TRUE, background = "#2E86AB", color = "white") %>%
+  row_spec(1, background = "#D4EDDA", bold = TRUE) %>%
+  column_spec(1, bold = TRUE)
+```
+
+```{r elastic-net-roc, echo=FALSE, fig.cap="ROC curve — Elastic Net"}
+plot(enet_roc,
+     col  = "#E63946",
+     lwd  = 2,
+     main = paste("Elastic Net — AUC =", round(enet_auc, 3)))
+abline(a = 0, b = 1, lty = 2, col = "gray60")
+```
+
+### 8.4 Model 3 — Random Forest
+
+Random Forest constructs a large ensemble of decision trees on bootstrap samples of the training data, aggregating predictions by majority vote. It handles categorical predictors natively, captures complex non-linear interactions automatically, and reduces the high variance of individual decision trees through averaging. The key tuning parameter is **mtry**,the number of predictors randomly sampled as candidates at each split,which is optimized via 10-fold cross-validation.
+
+```{r rf-model}
+set.seed(123)
+
+rf_grid <- expand.grid(mtry = c(2, 4, 6, 8, 10, 12))
+
+rf_model <- caret::train(
+  treatment ~ .,
+  data      = train_data,
+  method    = "rf",
+  metric    = "ROC",
+  trControl = ctrl,
+  tuneGrid  = rf_grid,
+  ntree     = 500
+)
+
+rf_model$bestTune
+```
+
+```{r rf-tuning-plot, echo=FALSE, fig.cap="Random Forest — Cross-validated AUC across mtry values"}
+plot(rf_model, 
+     main = "Random Forest hyperparameter tuning — mtry selection")
+```
+
+```{r rf-eval, echo=FALSE}
+rf_pred_prob <- predict(rf_model,
+                         newdata = test_data,
+                         type    = "prob")[, "Yes"]
+
+rf_pred_class <- predict(rf_model, newdata = test_data)
+
+rf_cm <- caret::confusionMatrix(rf_pred_class,
+                          test_data$treatment,
+                          positive = "Yes")
+
+rf_roc <- roc(test_data$treatment,
+               rf_pred_prob,
+               levels = c("No", "Yes"))
+
+rf_auc <- as.numeric(auc(rf_roc))
+
+tibble(
+  Metric = c("AUC-ROC", "Accuracy", "Sensitivity", "Specificity"),
+  Value  = round(c(
+    rf_auc,
+    rf_cm$overall["Accuracy"],
+    rf_cm$byClass["Sensitivity"],
+    rf_cm$byClass["Specificity"]
+  ), 4)
+) %>%
+  kbl(caption = "Model 3 — Random Forest performance on test set") %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = FALSE) %>%
+  row_spec(0, bold = TRUE, background = "#2E86AB", color = "white") %>%
+  row_spec(1, background = "#D4EDDA", bold = TRUE) %>%
+  column_spec(1, bold = TRUE)
+```
+
+```{r rf-roc, echo=FALSE, fig.cap="ROC curve — Random Forest"}
+plot(rf_roc,
+     col  = "#2DC653",
+     lwd  = 2,
+     main = paste("Random Forest — AUC =", round(rf_auc, 3)))
+abline(a = 0, b = 1, lty = 2, col = "gray60")
+```
+
+```{r rf-varimp, echo=FALSE, fig.cap="Random Forest — Variable importance (mean decrease in Gini)"}
+rf_importance <- randomForest::importance(rf_model$finalModel) %>%
+  as.data.frame() %>%
+  rownames_to_column("Variable") %>%
+  arrange(desc(MeanDecreaseGini)) %>%
+  slice_head(n = 15) %>%
+  mutate(
+    Variable = str_replace_all(Variable, "_", " "),
+    Variable = str_wrap(Variable, width = 28),
+    Variable = reorder(Variable, MeanDecreaseGini)
+  )
+
+ggplot(rf_importance, aes(x = Variable, y = MeanDecreaseGini)) +
+  geom_col(fill = "#2E86AB") +
+  coord_flip() +
+  labs(
+    title = "Top 15 Important Predictors: Random Forest",
+    subtitle = "Variable importance measured by mean decrease in Gini",
+    x = NULL,
+    y = "Mean Decrease in Gini"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16),
+    plot.subtitle = element_text(size = 11),
+    axis.text.y = element_text(size = 10),
+    panel.grid.major.y = element_blank()
+  )
+```
+
+
+### 8.5 Model 4 — Gradient Boosting (GBM)
+
+Gradient Boosting builds an ensemble sequentially — each successive tree is trained to correct the residual errors of the ensemble so far. This iterative error-correction strategy typically produces the highest predictive accuracy among tree-based methods. Four hyperparameters are tuned jointly via 10-fold cross-validation: the **number of trees** (n.trees), the **interaction depth** controlling tree complexity, the **shrinkage** parameter controlling the learning rate, and the **minimum observations per node** preventing overfitting. All combinations are evaluated across a tuning grid with AUC-ROC as the selection criterion, and the combination that maximizes cross-validated AUC on the training set is selected as the final model.
+
+
+```{r gb-model}
+set.seed(123)
+
+gbm_grid <- expand.grid(
+  n.trees           = c(50, 100, 150),
+  interaction.depth = c(1, 3, 5),
+  shrinkage         = c(0.01, 0.1),
+  n.minobsinnode    = 10
+)
+
+xgb_model <- caret::train(
+  treatment ~ .,
+  data      = train_data,
+  method    = "gbm",
+  metric    = "ROC",
+  trControl = ctrl,
+  tuneGrid  = gbm_grid,
+  verbose   = FALSE
+)
+
+xgb_model$bestTune
+```
+
+
+```{r gb-tuning-plot, echo=FALSE, fig.cap="XGBoost — Cross-validated AUC across tuning grid"}
+plot(xgb_model,
+     main = "GBM hyperparameter tuning")
+```
+
+```{r xgb-eval, echo=FALSE}
+xgb_pred_prob <- predict(xgb_model,
+                          newdata = test_xgb,
+                          type    = "prob")[, "Yes"]
+
+xgb_pred_class <- predict(xgb_model, newdata = test_xgb)
+
+xgb_cm <- caret::confusionMatrix(xgb_pred_class,
+                           test_xgb$treatment,
+                           positive = "Yes")
+
+xgb_roc <- roc(test_xgb$treatment,
+                xgb_pred_prob,
+                levels = c("No", "Yes"))
+
+xgb_auc <- as.numeric(auc(xgb_roc))
+
+tibble(
+  Metric = c("AUC-ROC", "Accuracy", "Sensitivity", "Specificity"),
+  Value  = round(c(
+    xgb_auc,
+    xgb_cm$overall["Accuracy"],
+    xgb_cm$byClass["Sensitivity"],
+    xgb_cm$byClass["Specificity"]
+  ), 4)
+) %>%
+  kbl(caption = "Model 4: XGBoost performance on test set") %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = FALSE) %>%
+  row_spec(0, bold = TRUE, background = "#2E86AB", color = "white") %>%
+  row_spec(1, background = "#D4EDDA", bold = TRUE) %>%
+  column_spec(1, bold = TRUE)
+```
+
+
+```{r xgb-varimp, echo=FALSE, fig.cap="XGBoost — Variable importance"}
+# Extract XGBoost variable importance
+xgb_imp <- caret::varImp(xgb_model, scale = TRUE)$importance
+
+# Clean and keep top 15 predictors
+xgb_imp_top <- xgb_imp %>%
+  rownames_to_column("Predictor") %>%
+  arrange(desc(Overall)) %>%
+  slice_head(n = 15) %>%
+  mutate(
+    Predictor = str_replace_all(Predictor, "_", " "),
+    Predictor = str_wrap(Predictor, width = 30),
+    Predictor = reorder(Predictor, Overall)
+  )
+
+# Report-ready plot
+ggplot(xgb_imp_top, aes(x = Predictor, y = Overall)) +
+  geom_col(fill = "#2E86AB", width = 0.75) +
+  coord_flip() +
+  labs(
+    title = "Top 15 Important Predictors:GBM",
+    subtitle = "Variable importance scaled from 0 to 100",
+    x = NULL,
+    y = "Variable Importance"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16),
+    plot.subtitle = element_text(size = 11),
+    axis.text.y = element_text(size = 10),
+    axis.text.x = element_text(size = 10),
+    axis.title.x = element_text(face = "bold"),
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+```
+
+### 8.6 Model Comparison
+
+All four models were evaluated on the same held-out macro test set of 250 observations. The table below summarises performance across all four metrics. AUC-ROC is the primary selection criterion as it evaluates discrimination ability across all classification thresholds rather than at a single cutoff point.
+
+```{r model-comparison, echo=FALSE}
+tibble(
+  Model = c("Logistic Regression", "Elastic Net", 
+            "Random Forest", "GBM"),
+  AUC_ROC     = round(c(logistic_auc, enet_auc, rf_auc, xgb_auc), 4),
+  Accuracy    = round(c(
+    logistic_cm$overall["Accuracy"],
+    enet_cm$overall["Accuracy"],
+    rf_cm$overall["Accuracy"],
+    xgb_cm$overall["Accuracy"]
+  ), 4),
+  Sensitivity = round(c(
+    logistic_cm$byClass["Sensitivity"],
+    enet_cm$byClass["Sensitivity"],
+    rf_cm$byClass["Sensitivity"],
+    xgb_cm$byClass["Sensitivity"]
+  ), 4),
+  Specificity = round(c(
+    logistic_cm$byClass["Specificity"],
+    enet_cm$byClass["Specificity"],
+    rf_cm$byClass["Specificity"],
+    xgb_cm$byClass["Specificity"]
+  ), 4)
+) %>%
+  arrange(desc(AUC_ROC)) %>%
+  kbl(caption = "Model comparison: all four models evaluated on held-out test set",
+      col.names = c("Model", "AUC-ROC", "Accuracy", 
+                    "Sensitivity", "Specificity")) %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = TRUE) %>%
+  row_spec(0, bold = TRUE, background = "#2E86AB", color = "white") %>%
+  row_spec(1, background = "#D4EDDA", bold = TRUE) %>%
+  column_spec(1, bold = TRUE)
+```
+
+```{r roc-comparison, echo=FALSE, fig.cap="ROC curves: all four models overlaid"}
+plot(logistic_roc, col = "#2E86AB", lwd = 2,
+     main = "ROC curve comparison: all models")
+plot(enet_roc,     col = "#E63946", lwd = 2, add = TRUE)
+plot(rf_roc,       col = "#2DC653", lwd = 2, add = TRUE)
+plot(xgb_roc,      col = "#F4A261", lwd = 2, add = TRUE)
+abline(a = 0, b = 1, lty = 2, col = "gray60")
+legend("bottomright",
+       legend = c(
+         paste("Logistic Regression (AUC =", round(logistic_auc, 3), ")"),
+         paste("Elastic Net         (AUC =", round(enet_auc, 3), ")"),
+         paste("Random Forest       (AUC =", round(rf_auc, 3), ")"),
+         paste("GBM             (AUC =", round(xgb_auc, 3), ")")
+       ),
+       col    = c("#2E86AB","#E63946","#2DC653","#F4A261"),
+       lwd    = 2,
+       bty    = "n",
+       cex    = 0.85)
+```
+
+---
+
+## 9. Closing Remarks
+
+### 9.1 Best Model Selection
+
+```{r best-model-id, echo=FALSE}
+results <- tibble(
+  Model   = c("Logistic Regression", "Elastic Net",
+              "Random Forest", "GBM"),
+  AUC_ROC = c(logistic_auc, enet_auc, rf_auc, xgb_auc)
+)
+
+best_model_name <- results$Model[which.max(results$AUC_ROC)]
+best_auc        <- max(results$AUC_ROC)
+```
+
+Based on AUC-ROC performance on the held-out test set, the best performing model is **`r best_model_name`** with an AUC of **`r round(best_auc, 3)`**. This model demonstrated the strongest ability to discriminate between tech workers who seek mental health treatment and those who do not, across all possible classification thresholds.
+The superior performance of the ensemble methods over logistic regression is consistent with the expectation that complex non-linear interactions exist among workplace environment variables, employer policies, and personal mental health history, relationships that a linear model cannot fully capture. The regularization applied by Elastic Net offered a meaningful improvement over unregularized logistic regression, confirming that multicollinearity among related workplace policy predictors was indeed a concern worth addressing.
+
+### 9.2 Variable Importance: Best Model
+
+The variable importance plot below identifies the predictors that contributed most strongly to the best model's predictions. These findings carry direct practical implications: the most important 
+predictors represent the workplace and personal factors that most strongly differentiate treatment-seekers from non-seekers, and could inform targeted employer interventions.
+
+```{r best-model-varimp, echo=FALSE, fig.cap="Variable importance: best performing model"}
+if (best_model_name == "Random Forest") {
+  varImpPlot(rf_model$finalModel,
+             main = paste("Variable importance:", best_model_name),
+             col  = "#2E86AB",
+             pch  = 19)
+} else if (best_model_name == "GBM") {
+  plot(varImp(xgb_model, scale = TRUE),
+       top  = 15,
+       main = paste("Top 15 predictors:", best_model_name))
+} else if (best_model_name == "Elastic Net") {
+  plot(varImp(enet_model, scale = TRUE),
+       top  = 15,
+       main = paste("Top 15 predictors:", best_model_name))
+} else {
+  plot(varImp(logistic_model, scale = TRUE),
+       top  = 15,
+       main = paste("Top 15 predictors:", best_model_name))
+}
+```
+
+
+
+### 9.3 Best Model Visualization: Elastic Net Coefficients
+
+The plot below shows the non-zero coefficients retained by the Elastic Net at the optimal lambda and alpha. Predictors with positive coefficients increase the predicted probability of seeking treatment, while those with negative coefficients decrease it. Predictors shrunk to zero were deemed non-informative and excluded from the final model entirely.
+
+```{r enet-coef-plot, echo=FALSE, fig.cap="Elastic Net: non-zero coefficients at optimal tuning parameters", fig.height=7}
+enet_coefs <- coef(enet_model$finalModel, 
+                    s = enet_model$bestTune$lambda)
+
+coef_df <- data.frame(
+  Predictor   = rownames(enet_coefs),
+  Coefficient = as.numeric(enet_coefs)
+) %>%
+  filter(Predictor != "(Intercept)", Coefficient != 0) %>%
+  arrange(desc(abs(Coefficient)))
+
+ggplot(coef_df, aes(x = reorder(Predictor, Coefficient),
+                     y = Coefficient,
+                     fill = Coefficient > 0)) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  scale_fill_manual(values = c("TRUE" = "#2E86AB", "FALSE" = "#E63946")) +
+  labs(
+    title    = "Elastic Net: retained predictors and their coefficients",
+    subtitle = "Blue = increases treatment probability, Red = decreases it",
+    x        = NULL,
+    y        = "Coefficient"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(plot.title    = element_text(face = "bold"),
+        plot.subtitle = element_text(color = "gray40"))
+```
+
+### 9.3 Model Interpretation: Prediction and Inference
+
+This project serves a dual analytical purpose. The primary goal is **predictive** building a model that accurately classifies whether 
+a tech worker will seek mental health treatment based on observable characteristics. However, in a healthcare and organizational context, prediction alone is insufficient. Stakeholders, employers, HR professionals, and mental health advocates,need to understand not just who is predicted to seek treatment, but **why**, so they can design meaningful interventions.
+The Elastic Net is uniquely suited to serve both purposes simultaneously. Unlike ensemble methods such as Random Forest and GBM, whose internal mechanics are difficult to communicate to non-technical audiences, the Elastic Net produces a sparse set of interpretable coefficients that directly quantify the relationship between each predictor and the log-odds of seeking treatment.
+
+#### The Model Equation
+
+The Elastic Net estimates the following logistic regression model, regularized by a combination of L1 and L2 penalties:
+
+$$\log\left(\frac{p}{1-p}\right) = \beta_0 + \sum_{j=1}^{p} \beta_j x_j$$
+
+where $p$ is the predicted probability of seeking mental health treatment, $\beta_0$ is the intercept, and $\beta_j$ are the coefficients estimated for each retained predictor $x_j$. The Elastic Net selects these coefficients by minimizing the penalized log-likelihood:
+
+$$\min_{\beta} \left[ -\ell(\beta) + \lambda \left( \alpha \|\beta\|_1 + \frac{1-\alpha}{2} \|\beta\|_2^2 \right) \right]$$
+
+where $\lambda$ controls the overall strength of regularization and $\alpha$ governs the balance between the L1 penalty (Lasso, which 
+drives uninformative coefficients to exactly zero) and the L2 penalty (Ridge, which stabilizes correlated coefficients). At the optimal 
+tuning parameters selected via cross-validation, the model retains only the most informative predictors and discards the rest.
+
+The estimated log-odds for a given respondent can be written more concretely using the top retained predictors as:
+
+```{r model-equation, echo=FALSE}
+enet_coefs_df <- data.frame(
+  Predictor   = rownames(enet_coefs),
+  Coefficient = round(as.numeric(enet_coefs), 4)
+) %>%
+  filter(Predictor != "(Intercept)", Coefficient != 0) %>%
+  arrange(desc(abs(Coefficient))) %>%
+  head(8)
+
+enet_intercept <- round(as.numeric(enet_coefs["(Intercept)", 1]), 4)
+
+enet_coefs_df %>%
+  mutate(
+    Direction = ifelse(Coefficient > 0, "Increases P(treatment)", 
+                                        "Decreases P(treatment)"),
+    Coefficient = round(Coefficient, 4)
+  ) %>%
+  kbl(caption = paste0(
+    "Top 8 retained Elastic Net coefficients (Intercept = ", 
+    enet_intercept, "). ",
+    "Full equation: log(p/1-p) = ", enet_intercept, 
+    " + (coefficients below x predictors)"),
+    col.names = c("Predictor", "Coefficient", "Direction")) %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = TRUE) %>%
+  row_spec(0, bold = TRUE, background = "#2E86AB", color = "white") %>%
+  row_spec(which(enet_coefs_df$Coefficient > 0), 
+           background = "#EBF5FB") %>%
+  row_spec(which(enet_coefs_df$Coefficient < 0), 
+           background = "#FDECEA") %>%
+  column_spec(1, bold = TRUE, monospace = TRUE) %>%
+  column_spec(3, italic = TRUE, color = "gray40")
+```
+
+A positive coefficient means that predictor increases the log-odds of seeking treatment, and therefore increases the predicted probability. A negative coefficient has the opposite effect. Predictors not shown were assigned a coefficient of exactly zero by the Elastic Net and play no role in the final model.
+
+#### Key Findings and Practical Implications
+
+**Family history** emerges as one of the strongest positive predictors, consistent with the well-established heritability of mental health conditions and the role of prior family exposure in normalizing help-seeking behavior.
+
+**Work interference** : how frequently mental health conditions interfere with daily work is strongly associated with treatment 
+seeking, suggesting that individuals whose functioning is visibly impaired are more likely to seek professional help.
+
+**Employer anonymity protections** matter significantly. Workers who reported uncertainty about whether their anonymity would be protected show lower predicted probabilities of seeking treatment, underscoring the chilling effect that privacy concerns have on help-seeking in workplace settings.
+
+**Workplace mental health culture** :captured through variables such as `wellness_program`, `seek_help`, and `mental_vs_physical`,
+collectively reflects the degree to which an employer signals that mental health is taken seriously. Positive signals from employers are associated with higher treatment-seeking rates, consistent with organizational research on psychological safety.
+These findings point to concrete, actionable levers that employers can adjust. An organization that strengthens anonymity protections, 
+invests in wellness programs, and explicitly communicates that mental health is treated on par with physical health can expect measurably higher rates of treatment-seeking among its workforce, and by extension, better employee outcomes and reduced productivity loss from untreated mental illness.
+
+In this sense, the Elastic Net model functions not just as a classifier but as a **diagnostic tool for organizational mental health culture**, making it the most appropriate and impactful choice for this analysis.
+
+
+### 9.4 Conclusion
+
+This project applied four distinct machine learning models to predict mental health treatment-seeking behavior among tech workers using the OSMI Mental Health in Tech Survey. The modeling pipeline followed a rigorous two-stage resampling framework: a macro holdout test set preserved for final evaluation, and 10-fold cross-validation applied consistently within the training set for hyperparameter tuning and model selection.
+
+The Elastic Net emerged as the best performing model, demonstrating that regularized linear models remain highly competitive when the 
+dataset is modest in size and the predictors are predominantly categorical. Key retained predictors, including family history of 
+mental illness, the degree to which mental health interferes with work, and employer attitudes toward mental health disclosure, align 
+closely with established research on treatment-seeking behavior in occupational health settings.
+
+From a practical standpoint, these results suggest that employers and HR teams can use observable workplace characteristics to identify 
+environments where employees are less likely to seek help, and design targeted interventions accordingly. The interpretability of the Elastic Net model is a particular strength in this context, as the direction and magnitude of each coefficient can be communicated directly to non-technical stakeholders without sacrificing predictive validity.
+
+### 9.5 Limitations
+
+Limitations worth acknowledging include the self-reported nature of the survey data, the overrepresentation of US-based male respondents, and the cross-sectional design which prevents causal inference. 
+
+### 9.6 Future Work
+
+Future work could extend this analysis to longitudinal data or incorporate natural language features from open-ended survey responses to capture richer signal about workplace culture.
+
+```{r session-info, echo=FALSE}
+tibble(
+  Item  = c("R version", "Key packages", "Random seed",
+            "Training observations", "Test observations",
+            "Best model", "Best AUC-ROC", "GitHub repository"),
+  Value = c(paste(R.version$major, R.version$minor, sep = "."),
+            "caret, glmnet, randomForest, gbm, pROC",
+            "123",
+            as.character(nrow(train_data)),
+            as.character(nrow(test_data)),
+            best_model_name,
+            as.character(round(best_auc, 4)),
+            "github.com/RichelCode/mental-health-workforce-prediction")
+) %>%
+  kbl(caption = "Reproducibility information") %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = FALSE) %>%
+  row_spec(0, bold = TRUE, background = "#2E86AB", color = "white") %>%
+  column_spec(1, bold = TRUE)
 ```
